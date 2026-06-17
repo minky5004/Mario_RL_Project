@@ -22,12 +22,17 @@
   Java 가 ``localhost:9999`` 로 접속할 수 있다.
 """
 
+import io
 import json
 import os
 import socket
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
+from PIL import Image
 
 # --- 통신 설정 ---------------------------------------------------------------
 HOST = "0.0.0.0"   # 컨테이너 외부(호스트)에서 접속 가능하도록 모든 인터페이스에 바인딩
@@ -35,6 +40,13 @@ PORT = 9999
 
 # 화면 렌더링 여부 (헤드리스 기본 OFF). WSL/로컬에서 보고 싶으면 RENDER=1.
 RENDER = os.environ.get("RENDER", "0") == "1"
+
+# --- 브라우저 화면 스트리밍 설정 ---------------------------------------------
+# 게임 화면(obs RGB)을 MJPEG 로 송출한다. 브라우저에서 http://localhost:8081 로 본다.
+# (env.render() 와 무관 — obs 픽셀을 직접 인코딩하므로 헤드리스에서도 동작)
+STREAM_PORT = 8081
+STREAM_SCALE = 3        # 240x256 화면을 3배 확대해 보기 좋게
+STREAM_FPS = 30
 
 # --- 행동 매핑 ---------------------------------------------------------------
 # Java 의 Action enum(0~5)과 1:1 로 맞춘 nes-py 버튼 조합.
@@ -145,6 +157,80 @@ def render_safe(env):
         pass
 
 
+# --- 브라우저 화면 스트리밍 (MJPEG) -----------------------------------------
+# 최신 게임 프레임(numpy RGB). 단일 변수 대입은 GIL 하에서 원자적이라 락 없이 공유한다.
+_latest_obs = None
+
+
+def set_frame(obs):
+    """최신 게임 화면을 스트리밍 버퍼에 저장한다."""
+    global _latest_obs
+    _latest_obs = obs
+
+
+def _encode_jpeg(obs):
+    """numpy RGB 배열을 (확대하여) JPEG 바이트로 인코딩한다."""
+    img = Image.fromarray(obs)
+    if STREAM_SCALE != 1:
+        img = img.resize((img.width * STREAM_SCALE, img.height * STREAM_SCALE), Image.NEAREST)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=80)
+    return buf.getvalue()
+
+
+_PAGE = (
+    "<html><head><title>Mario RL</title></head>"
+    "<body style='margin:0;background:#111;text-align:center'>"
+    "<img src='/stream' style='image-rendering:pixelated;margin-top:10px'>"
+    "</body></html>"
+).encode("utf-8")
+
+
+class _StreamHandler(BaseHTTPRequestHandler):
+    """'/' 는 보기 페이지, '/stream' 은 MJPEG 스트림을 제공한다."""
+
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(_PAGE)))
+            self.end_headers()
+            self.wfile.write(_PAGE)
+            return
+        if self.path != "/stream":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.end_headers()
+        delay = 1.0 / STREAM_FPS
+        try:
+            while True:
+                obs = _latest_obs
+                if obs is not None:
+                    jpg = _encode_jpeg(obs)
+                    self.wfile.write(b"--frame\r\n")
+                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                    self.wfile.write(f"Content-Length: {len(jpg)}\r\n\r\n".encode())
+                    self.wfile.write(jpg)
+                    self.wfile.write(b"\r\n")
+                time.sleep(delay)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # 브라우저 탭을 닫으면 발생 — 무시
+
+    def log_message(self, *args):
+        pass  # HTTP 접속 로그 억제
+
+
+def start_stream_server():
+    """백그라운드 스레드에서 MJPEG 스트리밍 서버를 띄운다."""
+    server = ThreadingHTTPServer(("0.0.0.0", STREAM_PORT), _StreamHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"[Stream] 브라우저에서 http://localhost:{STREAM_PORT} 로 화면 보기", flush=True)
+
+
 def serve(conn, env):
     """연결된 Java 클라이언트와 에피소드를 무한 반복하며 통신한다."""
     rfile = conn.makefile("r", encoding="utf-8")
@@ -161,6 +247,7 @@ def serve(conn, env):
         # reset 직후에는 info(x_pos 등)가 없으므로 NOOP 한 스텝으로 초기 정보를 얻는다.
         obs, _, done, info = step_compat(env, 0)
         render_safe(env)
+        set_frame(obs)
         prev_x = int(info.get("x_pos", 0))
 
         # ① 첫 상태 전송 (아직 Java 행동 전 — 보상 0, done False)
@@ -176,6 +263,7 @@ def serve(conn, env):
             # ③ 게임 한 스텝 진행
             obs, _, done, info = step_compat(env, action)
             render_safe(env)
+            set_frame(obs)
 
             reward, status = compute_reward(prev_x, info, done)
             prev_x = int(info.get("x_pos", prev_x))
@@ -191,6 +279,8 @@ def main():
     try:
         env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
         env = JoypadSpace(env, CUSTOM_MOVEMENT)
+
+        start_stream_server()  # 브라우저 화면 스트리밍 시작
 
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

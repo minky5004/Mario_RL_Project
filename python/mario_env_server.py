@@ -41,6 +41,10 @@ PORT = 9999
 # 화면 렌더링 여부 (헤드리스 기본 OFF). WSL/로컬에서 보고 싶으면 RENDER=1.
 RENDER = os.environ.get("RENDER", "0") == "1"
 
+# 프레임 스킵: 행동 1개를 몇 프레임 동안 유지할지. 값이 클수록 소켓 왕복이 줄어 한 판이 빨라진다.
+# (1 = 스킵 없음, 4 = 표준) — Atari/마리오 강화학습의 표준 기법.
+FRAME_SKIP = 4
+
 # --- 브라우저 화면 스트리밍 설정 ---------------------------------------------
 # 게임 화면(obs RGB)을 MJPEG 로 송출한다. 브라우저에서 http://localhost:8081 로 본다.
 # (env.render() 와 무관 — obs 픽셀을 직접 인코딩하므로 헤드리스에서도 동작)
@@ -88,6 +92,24 @@ def step_compat(env, action):
     else:
         obs, reward, done, info = result
     return obs, reward, bool(done), info
+
+
+def step_with_skip(env, action):
+    """행동을 FRAME_SKIP 프레임 동안 유지하며 진행한다. 중간에 done 이면 즉시 멈춘다.
+
+    매 프레임 화면을 갱신(스트리밍 부드럽게)하되, 소켓 왕복은 이 함수 1회당 1번만 일어나므로
+    한 판이 약 FRAME_SKIP 배 빨리 끝난다. 보상은 서버가 x_pos 변화로 직접 계산하므로
+    (compute_reward) 여기서 누적하지 않고, 스킵 후의 최종 obs/info 만 반환한다.
+    """
+    obs = info = None
+    done = False
+    for _ in range(max(1, FRAME_SKIP)):
+        obs, _, done, info = step_compat(env, action)
+        render_safe(env)
+        set_frame(obs)
+        if done:
+            break
+    return obs, done, info
 
 
 def detect_enemy_near(obs):
@@ -260,10 +282,8 @@ def serve(conn, env):
                 raise ConnectionError("Java 클라이언트 연결이 종료되었습니다.")
             action = int(json.loads(line)["action"])
 
-            # ③ 게임 한 스텝 진행
-            obs, _, done, info = step_compat(env, action)
-            render_safe(env)
-            set_frame(obs)
+            # ③ 게임을 FRAME_SKIP 프레임 진행 (같은 행동 유지 → 소켓 왕복 1/FRAME_SKIP)
+            obs, done, info = step_with_skip(env, action)
 
             reward, status = compute_reward(prev_x, info, done)
             prev_x = int(info.get("x_pos", prev_x))

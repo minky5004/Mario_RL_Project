@@ -1,7 +1,12 @@
 # Python 게임 환경 의존성
 # ⚠️ 구버전 스택이라 Python 3.8 ~ 3.10 에서만 안정적으로 설치된다.
 #    (Docker 의 python:3.10 이미지에서 설치하는 것을 기준으로 한다.)
-gym==0.26.2
+#
+# gym 은 0.25.2 로 핀한다: nes-py/gym-super-mario-bros 코어가 옛 step API(4-튜플)를
+# 반환하는데, gym 0.26 의 래퍼는 새 5-튜플을 기대해 충돌한다
+# (ValueError: not enough values to unpack (expected 5, got 4)).
+# 0.25.2 는 옛 API 가 기본이라 코어와 호환된다.
+gym==0.25.2
 gym-super-mario-bros==7.4.0
 nes-py==8.2.1
 numpy==1.24.0

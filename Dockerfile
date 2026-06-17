@@ -1,9 +1,9 @@
 # Mario RL — Python 게임 환경 서버 (헤드리스)
 #
-# 구버전 gym-super-mario-bros 스택은 Python 3.10 에서 안정적이므로 해당 이미지를 사용한다.
-# nes-py 는 C++ 확장을 컴파일하므로 build-essential 이 필요하다.
+# 빌드 컨텍스트는 저장소 루트다. (실제 소스는 python/ 에 있으므로 COPY 경로에 python/ 를 붙인다.)
+# 컨텍스트 최소화를 위해 .dockerignore 로 python/ 외 파일은 제외한다.
 #
-# 빌드:  docker build -t mario-env ./python
+# 빌드:  docker build -t mario-env .
 # 실행:  docker run --rm -p 9999:9999 mario-env
 #   (그 다음 Windows 에서  ./gradlew run  으로 Java 클라이언트 실행)
 
@@ -17,11 +17,11 @@ RUN apt-get update \
 WORKDIR /app
 
 # 의존성 먼저 설치 (레이어 캐시 활용)
-COPY requirements.txt .
+COPY python/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 서버 코드 복사
-COPY mario_env_server.py .
+COPY python/mario_env_server.py .
 
 # 헤드리스 기본 (화면 렌더링 off). 필요하면 docker run -e RENDER=1 ...
 ENV RENDER=0

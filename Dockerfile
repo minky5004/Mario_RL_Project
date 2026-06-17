@@ -4,8 +4,8 @@
 # 컨텍스트 최소화를 위해 .dockerignore 로 python/ 외 파일은 제외한다.
 #
 # 빌드:  docker build -t mario-env .
-# 실행:  docker run --rm -p 9999:9999 mario-env
-#   (그 다음 Windows 에서  ./gradlew run  으로 Java 클라이언트 실행)
+# 실행:  docker run --rm -p 9999:9999 -p 8081:8081 mario-env
+#   (Java:  ./gradlew run    화면:  브라우저로 http://localhost:8081)
 
 FROM python:3.10-slim
 
@@ -26,5 +26,5 @@ COPY python/mario_env_server.py .
 # 헤드리스 기본 (화면 렌더링 off). 필요하면 docker run -e RENDER=1 ...
 ENV RENDER=0
 
-EXPOSE 9999
+EXPOSE 9999 8081
 CMD ["python", "mario_env_server.py"]

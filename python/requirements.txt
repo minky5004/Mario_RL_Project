@@ -10,3 +10,5 @@ gym==0.25.2
 gym-super-mario-bros==7.4.0
 nes-py==8.2.1
 numpy==1.24.0
+# 브라우저 화면 스트리밍(MJPEG)용 — 게임 화면(obs)을 JPEG 로 인코딩
+Pillow==10.4.0

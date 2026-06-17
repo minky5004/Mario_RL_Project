@@ -41,3 +41,19 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Python ###
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+### Claude / Claude Code ###
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.claude.json
+.mcp.json

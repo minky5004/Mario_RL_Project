@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'application'
 }
 
 group = 'com.mario.rl'
@@ -10,9 +11,27 @@ repositories {
 }
 
 dependencies {
+    // JSON 직렬화/역직렬화 (Python 서버와의 소켓 통신용)
+    implementation 'com.google.code.gson:gson:2.10.1'
+
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+    // 프로그램 진입점
+    mainClass = 'com.mario.rl.Main'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+// 한글 주석/문자열이 OS 기본 인코딩(cp949)이 아닌 UTF-8로 컴파일되도록 강제
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
 test {

@@ -68,16 +68,35 @@ CUSTOM_MOVEMENT = [
 # --- 보상 상수 (docs/03-보상설계.md 의 표와 일치) ----------------------------
 FORWARD_SCALE = 0.1      # 전진 1px 당 보상
 BACKWARD_PENALTY = -5.0  # 후퇴 시
-DEATH_PENALTY = -100.0   # 사망 시
+DEATH_PENALTY = -100.0   # 사망 시 (적과 충돌 등)
 CLEAR_REWARD = 1000.0    # 깃발 도달(클리어)
 TIMEOUT_PENALTY = -50.0  # 시간 초과
 
-# --- enemy_near 탐지 설정 ----------------------------------------------------
-# 마리오는 스크롤 중 화면상 일정 x(~110px) 근처에 머문다. 그 오른쪽 영역에서
-# 굼바 갈색 계열 픽셀이 보이면 "적이 가깝다"고 (대략) 판단한다. (휴리스틱)
-ENEMY_SCAN_X = 110
-ENEMY_SCAN_WIDTH = 40
-ENEMY_PIXEL_THRESHOLD = 20
+# --- [DAY2] 낙사/굼바 사망 구분 (측정 인프라) -------------------------------
+# 트라이1(낙사 페널티 -300)은 종료됨 → 보상은 baseline(-100)으로 복구.
+# 단, 사망 원인(dead_pit/dead_enemy) 구분과 종료 로그는 "어디서 죽는지" 측정에 유용하므로 유지한다.
+#   → 결과: docs/실험일지/[DAY2] 진짜 1차 관문 - 굼바 넘기.md
+PIT_DEATH_PENALTY = -100.0   # 낙사 — baseline 사망과 동일 (트라이1 종료 후 복구)
+# 마리오가 화면 아래로 떨어지면(=낙사) y_pos 가 이 값 이상이 된다. (실측: 낙사≈253 / 지상≈79)
+PIT_Y_THRESHOLD = 200
+
+# --- 적(굼바) 거리 탐지 설정 — [DAY2 트라이3] RAM 직접 읽기 -------------------
+# 트라이2에서 갈색 픽셀 스캔(_is_enemy_brown)이 굼바가 아니라 "마리오 자신"을 잡고 있었음이
+# 드러났다(항상 dist=3). → 픽셀 추측을 버리고 nes-py의 RAM(env.ram, 2KB)에서 적 슬롯의
+# 실제 x좌표를 직접 읽어 "마리오 x − 적 x"로 거리를 계산한다. (SMB 표준 RAM 맵)
+#
+# SMB 적 슬롯은 5개. 각 슬롯마다 아래 주소를 가진다(전역 x = page*256 + x_in_page):
+ENEMY_SLOTS = 5
+ADDR_ENEMY_DRAWN = 0x0F     # 0x0F~0x13: 슬롯 활성 플래그(0=빈 슬롯, 그 외=적 존재)
+ADDR_ENEMY_X_PAGE = 0x6E    # 0x6E~0x72: 적 x 상위 바이트(페이지)
+ADDR_ENEMY_X = 0x87         # 0x87~0x8B: 적 x 하위 바이트(페이지 내 위치)
+# 마리오 전역 x = info["x_pos"] (= RAM 0x6D*256 + 0x86) 와 같은 좌표계라 그대로 빼면 된다.
+#
+# 마리오 앞쪽 거리(px)를 4단계로 매핑. 굼바 폭 ~16px 기준, 점프 타이밍을 배우게끔 구간을 나눈다.
+#   0 없음(앞에 적 없음/너무 멂) / 1 멂 / 2 가까움 / 3 위험함(바로 앞)
+ENEMY_DIST_DANGER = 24   # 단계3 위험함: 마리오 앞 0~24px
+ENEMY_DIST_NEAR = 48     # 단계2 가까움: 24~48px
+ENEMY_DIST_FAR = 96      # 단계1 멂:     48~96px (그 너머는 0 없음)
 
 
 def step_compat(env, action):
@@ -112,25 +131,68 @@ def step_with_skip(env, action):
     return obs, done, info
 
 
-def detect_enemy_near(obs):
-    """관측 RGB 배열에서 마리오 앞쪽에 적(갈색 계열)이 있는지 대략 판단한다."""
-    if obs is None:
-        return False
-    height, width, _ = obs.shape
-    x0 = min(ENEMY_SCAN_X, width - 1)
-    x1 = min(x0 + ENEMY_SCAN_WIDTH, width)
-    region = obs[:, x0:x1, :]
+def get_ram(env):
+    """JoypadSpace 래퍼 안쪽 nes-py 환경의 RAM(2KB numpy 배열)을 best-effort 로 얻는다.
 
-    r = region[..., 0].astype(int)
-    g = region[..., 1].astype(int)
-    b = region[..., 2].astype(int)
-    # 굼바 갈색 대략: R 140~220, G 50~130, B<100, 그리고 R>G>B
-    mask = (r > 140) & (r < 220) & (g > 50) & (g < 130) & (b < 100) & (r > g) & (g > b)
-    return bool(mask.sum() > ENEMY_PIXEL_THRESHOLD)
+    JoypadSpace(gym.Wrapper)는 .ram 을 직접 노출하지 않을 수 있어 .unwrapped 까지 확인한다.
+    """
+    ram = getattr(env, "ram", None)
+    if ram is None:
+        ram = getattr(getattr(env, "unwrapped", env), "ram", None)
+    return ram
+
+
+def nearest_enemy_ahead(env, mario_x):
+    """마리오 앞쪽(오른쪽)에서 가장 가까운 활성 적까지의 거리(px)를 반환한다. 없으면 None.
+
+    RAM의 적 슬롯 5개를 훑어 활성(ADDR_ENEMY_DRAWN≠0) 슬롯의 전역 x 를 구하고,
+    마리오보다 앞(dx≥0)인 것 중 최솟값을 고른다. (이미 지나친 뒤쪽 적은 무시)
+    """
+    ram = get_ram(env)
+    if ram is None:
+        return None
+    nearest = None
+    for i in range(ENEMY_SLOTS):
+        if int(ram[ADDR_ENEMY_DRAWN + i]) == 0:        # 빈 슬롯
+            continue
+        enemy_x = int(ram[ADDR_ENEMY_X_PAGE + i]) * 256 + int(ram[ADDR_ENEMY_X + i])
+        dx = enemy_x - mario_x
+        if dx < 0:                                     # 뒤쪽(지나친) 적
+            continue
+        if nearest is None or dx < nearest:
+            nearest = dx
+    return nearest
+
+
+def detect_enemy_distance(env, mario_x):
+    """마리오 앞쪽 가장 가까운 적까지의 거리를 4단계로 매핑한다.
+
+    0 없음 / 1 멂 / 2 가까움 / 3 위험함. (트라이3: 픽셀이 아니라 RAM 좌표로 계산)
+    """
+    nearest = nearest_enemy_ahead(env, mario_x)
+    if nearest is None or nearest > ENEMY_DIST_FAR:
+        return 0
+    if nearest <= ENEMY_DIST_DANGER:
+        return 3
+    if nearest <= ENEMY_DIST_NEAR:
+        return 2
+    return 1
+
+
+def is_pit_death(info):
+    """사망이 '낙사(구덩이 추락)'인지 대략 판단한다. (적 충돌과 구분하기 위함)
+
+    마리오가 구덩이로 떨어지면 화면 아래로 내려가 y_pos 가 커진다. 이 값이
+    PIT_Y_THRESHOLD 이상이면 낙사로 본다. (휴리스틱 — 첫 실행 로그로 임계 튜닝)
+    """
+    return int(info.get("y_pos", 0)) >= PIT_Y_THRESHOLD
 
 
 def compute_reward(prev_x, info, done):
-    """docs/03 의 보상표대로 보상과 종료 원인 문자열을 계산한다."""
+    """docs/03 의 보상표대로 보상과 종료 원인 문자열을 계산한다.
+
+    [DAY2 트라이1] 사망을 낙사(dead_pit)/적(dead_enemy)으로 구분하고, 낙사만 페널티를 키운다.
+    """
     x = int(info.get("x_pos", prev_x))
     dx = x - prev_x
 
@@ -149,18 +211,22 @@ def compute_reward(prev_x, info, done):
         if int(info.get("time", 1)) <= 0:  # 시간 초과
             reward = TIMEOUT_PENALTY
             status = "timeout"
-        else:                              # 그 외 종료 = 사망
+        elif is_pit_death(info):           # 낙사(구덩이 추락) — 페널티 키움(대조군)
+            reward = PIT_DEATH_PENALTY
+            status = "dead_pit"
+        else:                              # 그 외 사망(적 충돌 등)
             reward = DEATH_PENALTY
-            status = "dead"
+            status = "dead_enemy"
     return reward, status
 
 
-def build_state(info, reward, done, status, obs):
+def build_state(info, reward, done, status, env):
     """Java GameState 모델과 같은 필드의 dict 를 만든다 (snake_case)."""
+    mario_x = int(info.get("x_pos", 0))
     return {
-        "mario_x": int(info.get("x_pos", 0)),
+        "mario_x": mario_x,
         "mario_y": int(info.get("y_pos", 0)),
-        "enemy_near": detect_enemy_near(obs),
+        "enemy_dist": detect_enemy_distance(env, mario_x),
         "score": int(info.get("score", 0)),
         "time_left": int(info.get("time", 0)),
         "reward": float(reward),
@@ -262,7 +328,9 @@ def serve(conn, env):
         wfile.write(json.dumps(state) + "\n")
         wfile.flush()
 
+    episode = 0
     while True:  # 에피소드 무한 반복 (항상 1-1)
+        episode += 1
         reset_result = env.reset()
         _obs = reset_result[0] if isinstance(reset_result, tuple) else reset_result
 
@@ -271,9 +339,11 @@ def serve(conn, env):
         render_safe(env)
         set_frame(obs)
         prev_x = int(info.get("x_pos", 0))
+        max_x = prev_x
+        status = "running"
 
         # ① 첫 상태 전송 (아직 Java 행동 전 — 보상 0, done False)
-        send_state(build_state(info, 0.0, False, "running", obs))
+        send_state(build_state(info, 0.0, False, "running", env))
 
         while not done:
             # ② Java 행동 수신
@@ -287,9 +357,15 @@ def serve(conn, env):
 
             reward, status = compute_reward(prev_x, info, done)
             prev_x = int(info.get("x_pos", prev_x))
+            max_x = max(max_x, prev_x)
 
             # ④ 결과 상태 전송 (done 이면 종료 신호)
-            send_state(build_state(info, reward, done, status, obs))
+            state = build_state(info, reward, done, status, env)
+            send_state(state)
+
+        # [DAY2 트라이1] 종료 원인 로그 — 낙사율 집계 + y_pos 임계(PIT_Y_THRESHOLD) 실측/튜닝용.
+        print(f"[Ep {episode:4d}] status={status:10s} maxX={max_x:5d} "
+              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d}", flush=True)
         # done 상태를 보냈으므로 recv 없이 위로 돌아가 reset → 첫 상태 전송
 
 

@@ -9,7 +9,7 @@ package com.mario.rl.model;
  * <p>수신 JSON 예시:
  * <pre>
  * {
- *   "mario_x": 320, "mario_y": 180, "enemy_near": false,
+ *   "mario_x": 320, "mario_y": 180, "enemy_dist": 2,
  *   "score": 100, "time_left": 380, "reward": 3.2,
  *   "done": false, "info": "running"
  * }
@@ -21,8 +21,8 @@ public class GameState {
     private int mario_x;
     /** 마리오의 Y 좌표. */
     private int mario_y;
-    /** 주변 2칸 이내 적 존재 여부. */
-    private boolean enemy_near;
+    /** 앞쪽 굼바까지의 거리 단계 (0 없음 / 1 멂 / 2 가까움 / 3 위험함). */
+    private int enemy_dist;
     /** 현재 점수. */
     private int score;
     /** 남은 시간. */
@@ -54,14 +54,14 @@ public class GameState {
         this.mario_y = mario_y;
     }
 
-    /** 주변 적 존재 여부를 반환한다. */
-    public boolean isEnemyNear() {
-        return enemy_near;
+    /** 앞쪽 굼바까지의 거리 단계(0~3)를 반환한다. */
+    public int getEnemyDist() {
+        return enemy_dist;
     }
 
-    /** 주변 적 존재 여부를 설정한다. */
-    public void setEnemyNear(boolean enemy_near) {
-        this.enemy_near = enemy_near;
+    /** 앞쪽 굼바까지의 거리 단계(0~3)를 설정한다. */
+    public void setEnemyDist(int enemy_dist) {
+        this.enemy_dist = enemy_dist;
     }
 
     /** 현재 점수를 반환한다. */
@@ -119,7 +119,7 @@ public class GameState {
         return "GameState{" +
                 "mario_x=" + mario_x +
                 ", mario_y=" + mario_y +
-                ", enemy_near=" + enemy_near +
+                ", enemy_dist=" + enemy_dist +
                 ", score=" + score +
                 ", time_left=" + time_left +
                 ", reward=" + reward +

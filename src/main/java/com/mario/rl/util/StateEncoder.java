@@ -9,7 +9,7 @@ import com.mario.rl.model.GameState;
  * 인코딩에 사용하는 특징은 다음 세 가지다:</p>
  * <ul>
  *   <li>마리오의 X 좌표를 {@value #X_ZONES}개 구간으로 분할</li>
- *   <li>주변 적 존재 여부 (0/1)</li>
+ *   <li>앞쪽 굼바까지의 거리 단계 (0 없음 / 1 멂 / 2 가까움 / 3 위험함)</li>
  *   <li>마리오의 높이를 높음(0)/낮음(1)으로 이진화</li>
  * </ul>
  *
@@ -27,7 +27,7 @@ public class StateEncoder {
     private static final int Y_THRESHOLD = 160;
     /** 인덱스 계산 시 X 구간에 곱하는 가중치. */
     private static final int X_ZONE_WEIGHT = 20;
-    /** 인덱스 계산 시 적 존재 여부에 곱하는 가중치. */
+    /** 인덱스 계산 시 굼바 거리 단계(0~3)에 곱하는 가중치. */
     private static final int ENEMY_WEIGHT = 2;
     /** Q-Table의 상태 차원 크기 (인덱스 상한). */
     public static final int STATE_SIZE = 1000;
@@ -40,10 +40,10 @@ public class StateEncoder {
      */
     public int encode(GameState state) {
         int xZone = Math.min(state.getMarioX(), X_MAX) / X_ZONE_WIDTH;
-        int enemy = state.isEnemyNear() ? 1 : 0;
+        int enemyDist = state.getEnemyDist();   // 0 없음 / 1 멂 / 2 가까움 / 3 위험함
         int yZone = state.getMarioY() < Y_THRESHOLD ? 0 : 1;
 
-        int index = (xZone * X_ZONE_WEIGHT) + (enemy * ENEMY_WEIGHT) + yZone;
+        int index = (xZone * X_ZONE_WEIGHT) + (enemyDist * ENEMY_WEIGHT) + yZone;
         return Math.min(index, STATE_SIZE - 1);
     }
 }

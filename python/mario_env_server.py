@@ -98,6 +98,14 @@ ENEMY_DIST_DANGER = 24   # 단계3 위험함: 마리오 앞 0~24px
 ENEMY_DIST_NEAR = 48     # 단계2 가까움: 24~48px
 ENEMY_DIST_FAR = 96      # 단계1 멂:     48~96px (그 너머는 0 없음)
 
+# --- [DAY3 트라이1] 굼바 밟기(stomp) 보너스 --------------------------------
+# 인식(enemy_dist)은 진짜가 됐으나(DAY2 트라이3) 보상이 "굼바 넘기"를 직접 가리키지 않아
+# 첫 굼바를 '확신'하며 넘지 못했다(후반에도 20% 사망). → 밟기 자체에 보너스를 줘 행동을 강화한다.
+# 감지(추측 금지, RAM 측정): 직전 스텝 마리오 앞 STOMP_DETECT_PX 이내에 있던 활성 적 슬롯이
+# 이번 스텝에 비활성(0x0F~0x13=0)으로 바뀌고 마리오가 생존하면 = 밟아서 처치한 것.
+GOOMBA_STOMP_BONUS = 50.0   # 밟기 1회 보너스 (사망 -100의 절반)
+STOMP_DETECT_PX = 48        # 직전 스텝 마리오 앞 이 거리(0~48px) 이내 적을 밟기 판정 대상으로
+
 
 def step_compat(env, action):
     """gym 구/신 API 모두 지원하는 step 래퍼.
@@ -177,6 +185,44 @@ def detect_enemy_distance(env, mario_x):
     if nearest <= ENEMY_DIST_NEAR:
         return 2
     return 1
+
+
+def active_enemies_ahead(env, mario_x):
+    """마리오 앞 STOMP_DETECT_PX 이내에 있는 활성 적 슬롯 인덱스 집합을 반환한다.
+
+    밟기 판정의 '직전 상태'로 쓴다 — 이 슬롯이 다음 스텝에 비활성(0)이 되면 밟힌 것으로 본다.
+    (거리 4단계 detect_enemy_distance 와 달리, 슬롯 인덱스를 추적해야 사라짐을 잡을 수 있어 별도 함수)
+    """
+    ram = get_ram(env)
+    slots = set()
+    if ram is None:
+        return slots
+    for i in range(ENEMY_SLOTS):
+        if int(ram[ADDR_ENEMY_DRAWN + i]) == 0:        # 빈 슬롯
+            continue
+        enemy_x = int(ram[ADDR_ENEMY_X_PAGE + i]) * 256 + int(ram[ADDR_ENEMY_X + i])
+        dx = enemy_x - mario_x
+        if 0 <= dx <= STOMP_DETECT_PX:                  # 마리오 앞 가까이만
+            slots.add(i)
+    return slots
+
+
+def detect_stomp(env, prev_slots, done):
+    """직전 스텝 마리오 앞에 있던 적 슬롯이 이번 스텝에 사라졌고(밟혀 처치) 마리오가 생존이면 True.
+
+    - prev_slots: 직전 스텝의 active_enemies_ahead 결과(슬롯 인덱스 집합).
+    - done(=마리오 사망/종료)이면 밟기 아님(부딪혀 죽은 경우 굼바는 살아있다).
+    - 뛰어넘기는 굼바 슬롯이 active 인 채 뒤로 가므로 비활성화로 잡히지 않는다 → 밟기만 검출.
+    """
+    if done or not prev_slots:
+        return False
+    ram = get_ram(env)
+    if ram is None:
+        return False
+    for i in prev_slots:
+        if int(ram[ADDR_ENEMY_DRAWN + i]) == 0:        # 그 슬롯이 비워짐 = 밟혀 사라짐
+            return True
+    return False
 
 
 def is_pit_death(info):
@@ -341,6 +387,8 @@ def serve(conn, env):
         prev_x = int(info.get("x_pos", 0))
         max_x = prev_x
         status = "running"
+        prev_slots = active_enemies_ahead(env, prev_x)  # [DAY3] 밟기 판정용 직전 적 슬롯
+        stomp_count = 0                                 # [DAY3] 그 판에서 밟은 횟수
 
         # ① 첫 상태 전송 (아직 Java 행동 전 — 보상 0, done False)
         send_state(build_state(info, 0.0, False, "running", env))
@@ -356,7 +404,14 @@ def serve(conn, env):
             obs, done, info = step_with_skip(env, action)
 
             reward, status = compute_reward(prev_x, info, done)
+
+            # [DAY3 트라이1] 밟기 보너스 — 직전 적 슬롯이 사라졌고 생존이면 처치로 보고 보너스.
+            if detect_stomp(env, prev_slots, done):
+                reward += GOOMBA_STOMP_BONUS
+                stomp_count += 1
+
             prev_x = int(info.get("x_pos", prev_x))
+            prev_slots = active_enemies_ahead(env, prev_x)
             max_x = max(max_x, prev_x)
 
             # ④ 결과 상태 전송 (done 이면 종료 신호)
@@ -364,8 +419,10 @@ def serve(conn, env):
             send_state(state)
 
         # [DAY2 트라이1] 종료 원인 로그 — 낙사율 집계 + y_pos 임계(PIT_Y_THRESHOLD) 실측/튜닝용.
+        # [DAY3 트라이1] stomps=N(그 판 밟기 횟수) 추가 — 통과율과 함께 행동 강화 효과 측정용.
         print(f"[Ep {episode:4d}] status={status:10s} maxX={max_x:5d} "
-              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d}", flush=True)
+              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} "
+              f"stomps={stomp_count}", flush=True)
         # done 상태를 보냈으므로 recv 없이 위로 돌아가 reset → 첫 상태 전송
 
 

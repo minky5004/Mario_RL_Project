@@ -106,6 +106,23 @@ ENEMY_DIST_FAR = 96      # 단계1 멂:     48~96px (그 너머는 0 없음)
 GOOMBA_STOMP_BONUS = 50.0   # 밟기 1회 보너스 (사망 -100의 절반). [DAY3 트라이2] +150 실험했으나 밟기 비율 무변화로 +50 원복
 STOMP_DETECT_PX = 48        # 직전 스텝 마리오 앞 이 거리(0~48px) 이내 적을 밟기 판정 대상으로
 
+# --- 구덩이(낙사 함정) 거리 탐지 — [DAY4 트라이1] 바닥 타일맵 직접 읽기 ----------
+# 굼바는 적 슬롯 좌표가 있지만 구덩이는 "객체"가 없다. 대신 SMB 플레이영역 타일맵(RAM 0x0500~)을
+# 읽어, 마리오 앞 지면 칸이 비어 있으면(타일 0) 거기를 구덩이로 본다. (추측 금지 — [pit] 로그로 검증)
+#
+# SMB 타일맵: 0x0500부터 2화면분(각 13행×16열=0xD0). 전역 픽셀(x)·타일 행(row 0~12)→주소:
+#   page = (x // 256) % 2,  col = (x % 256)//16,  addr = 0x500 + page*0xD0 + row*16 + col
+TILEMAP_BASE = 0x0500
+TILE_PAGE_SIZE = 0xD0        # 한 화면 = 13행 × 16열 = 208바이트
+TILE_ROWS = 13              # 타일 행 수(0~12)
+GROUND_ROW = 12            # 평지 지면 행(맨 아래). [pit] 검증으로 확정(행11·12 동일하게 지면).
+PIT_SCAN_TILES = 4         # 마리오 앞 몇 칸(16px)까지 구덩이를 살필지 (≤48px=NEAR까지면 충분)
+
+# 구덩이 거리 3단계(굼바보다 한 단계 적게 — 상태 폭증 방지). 0 없음 / 1 가까움 / 2 코앞.
+# 굼바와 달리 구덩이 점프는 "코앞이냐"가 핵심이라 3단계로 충분.
+PIT_DIST_DANGER = 16        # 단계2 코앞: 마리오 앞 0~16px (지금 점프해야 건넘)
+PIT_DIST_NEAR = 48          # 단계1 가까움: 16~48px (그 너머는 0 없음)
+
 
 def step_compat(env, action):
     """gym 구/신 API 모두 지원하는 step 래퍼.
@@ -183,6 +200,45 @@ def detect_enemy_distance(env, mario_x):
     if nearest <= ENEMY_DIST_DANGER:
         return 3
     if nearest <= ENEMY_DIST_NEAR:
+        return 2
+    return 1
+
+
+def read_tile(ram, x_global, row):
+    """전역 픽셀 x와 타일 행(0~12)의 타일 값을 읽는다. (0=빈칸, 그 외=블록/지면)
+
+    page = (x//256)%2 로 두 화면 중 어느 쪽인지 고르고, 화면 내 열·행으로 주소를 만든다.
+    """
+    if row < 0 or row >= TILE_ROWS:
+        return 0
+    page = (x_global // 256) % 2
+    col = (x_global % 256) // 16
+    return int(ram[TILEMAP_BASE + page * TILE_PAGE_SIZE + row * 16 + col])
+
+
+def nearest_pit_ahead(env, mario_x):
+    """마리오 앞쪽 지면 행(GROUND_ROW)이 비어 있는 가장 가까운 칸까지의 거리(px)를 반환. 없으면 None.
+
+    굼바 nearest_enemy_ahead 와 대칭 — 앞 칸을 16px 단위로 훑어 첫 빈 지면(구덩이)을 찾는다.
+    """
+    ram = get_ram(env)
+    if ram is None:
+        return None
+    for k in range(1, PIT_SCAN_TILES + 1):
+        if read_tile(ram, mario_x + k * 16, GROUND_ROW) == 0:   # 지면 칸이 비었다 = 구덩이
+            return k * 16
+    return None
+
+
+def detect_pit_distance(env, mario_x):
+    """마리오 앞 가장 가까운 구덩이까지 거리를 3단계로 매핑한다. 0 없음 / 1 가까움 / 2 코앞.
+
+    굼바 detect_enemy_distance 와 대칭. 단계만 4→3 (구덩이는 "코앞이냐"가 핵심).
+    """
+    nearest = nearest_pit_ahead(env, mario_x)
+    if nearest is None or nearest > PIT_DIST_NEAR:
+        return 0
+    if nearest <= PIT_DIST_DANGER:
         return 2
     return 1
 
@@ -273,6 +329,7 @@ def build_state(info, reward, done, status, env):
         "mario_x": mario_x,
         "mario_y": int(info.get("y_pos", 0)),
         "enemy_dist": detect_enemy_distance(env, mario_x),
+        "pit_dist": detect_pit_distance(env, mario_x),
         "score": int(info.get("score", 0)),
         "time_left": int(info.get("time", 0)),
         "reward": float(reward),

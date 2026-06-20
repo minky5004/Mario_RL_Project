@@ -123,6 +123,13 @@ PIT_SCAN_TILES = 4         # 마리오 앞 몇 칸(16px)까지 구덩이를 살�
 PIT_DIST_DANGER = 16        # 단계2 코앞: 마리오 앞 0~16px (지금 점프해야 건넘)
 PIT_DIST_NEAR = 48          # 단계1 가까움: 16~48px (그 너머는 0 없음)
 
+# --- [DAY4 트라이2] 구덩이 통과 보너스 -------------------------------------
+# 구덩이를 무사히 건너면 보너스. 굼바 밟기(detect_stomp)와 대칭 — 앞에 나타난 구덩이의 절대 x를
+# 기억해, 마리오가 그 너머(폭+여유)까지 가고도 생존하면 "통과"로 본다. 빠지면 done(dead_pit)이라
+# 보너스가 안 들어감 → 넘은 경우만 보상. (추측 금지 — 임시 [clear] 로그로 검증)
+PIT_CLEAR_BONUS = 50.0       # 통과 1회 보너스 (굼바 밟기와 통일, 사망 -100의 절반)
+PIT_CLEAR_MARGIN = 32        # 구덩이 시작 x로부터 이만큼 더 가야(폭 너머) 통과로 인정
+
 
 def step_compat(env, action):
     """gym 구/신 API 모두 지원하는 step 래퍼.
@@ -446,6 +453,8 @@ def serve(conn, env):
         status = "running"
         prev_slots = active_enemies_ahead(env, prev_x)  # [DAY3] 밟기 판정용 직전 적 슬롯
         stomp_count = 0                                 # [DAY3] 그 판에서 밟은 횟수
+        pending_pit_x = None                            # [DAY4 트라이2] 추적 중인 구덩이 시작 절대 x
+        pit_clear_count = 0                             # [DAY4 트라이2] 그 판에서 통과한 구덩이 수
 
         # ① 첫 상태 전송 (아직 Java 행동 전 — 보상 0, done False)
         send_state(build_state(info, 0.0, False, "running", env))
@@ -471,6 +480,16 @@ def serve(conn, env):
             prev_slots = active_enemies_ahead(env, prev_x)
             max_x = max(max_x, prev_x)
 
+            # [DAY4 트라이2] 구덩이 통과 보너스 — 앞에 구덩이가 나타나면 그 절대 x를 기억하고,
+            # 마리오가 폭 너머(+MARGIN)까지 가고도 생존(not done)이면 건넌 것으로 보고 보너스.
+            pit_px = nearest_pit_ahead(env, prev_x)
+            if pit_px is not None and pit_px <= PIT_DIST_NEAR and pending_pit_x is None:
+                pending_pit_x = prev_x + pit_px                       # 추적 시작(구덩이 시작 x)
+            if pending_pit_x is not None and not done and prev_x > pending_pit_x + PIT_CLEAR_MARGIN:
+                reward += PIT_CLEAR_BONUS
+                pit_clear_count += 1
+                pending_pit_x = None
+
             # ④ 결과 상태 전송 (done 이면 종료 신호)
             state = build_state(info, reward, done, status, env)
             send_state(state)
@@ -479,7 +498,7 @@ def serve(conn, env):
         # [DAY3 트라이1] stomps=N(그 판 밟기 횟수) 추가 — 통과율과 함께 행동 강화 효과 측정용.
         print(f"[Ep {episode:4d}] status={status:10s} maxX={max_x:5d} "
               f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} "
-              f"stomps={stomp_count}", flush=True)
+              f"stomps={stomp_count} pitclears={pit_clear_count}", flush=True)
         # done 상태를 보냈으므로 recv 없이 위로 돌아가 reset → 첫 상태 전송
 
 

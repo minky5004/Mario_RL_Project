@@ -451,6 +451,8 @@ def serve(conn, env):
         set_frame(obs)
         prev_x = int(info.get("x_pos", 0))
         max_x = prev_x
+        min_y = int(info.get("y_pos", 255))            # [DAY5 트라이1] 그 판 y_pos 범위 측정(좌표계 확정용)
+        max_y = int(info.get("y_pos", 0))
         status = "running"
         prev_slots = active_enemies_ahead(env, prev_x)  # [DAY3] 밟기 판정용 직전 적 슬롯
         stomp_count = 0                                 # [DAY3] 그 판에서 밟은 횟수
@@ -480,6 +482,10 @@ def serve(conn, env):
             prev_x = int(info.get("x_pos", prev_x))
             prev_slots = active_enemies_ahead(env, prev_x)
             max_x = max(max_x, prev_x)
+            if not done:                                # 낙사 death-jump(y_pos 급변)는 제외
+                cur_y = int(info.get("y_pos", min_y))
+                min_y = min(min_y, cur_y)
+                max_y = max(max_y, cur_y)
 
             # [DAY4 트라이2] 구덩이 통과 보너스 — 앞에 구덩이가 나타나면 그 절대 x를 기억하고,
             # 마리오가 폭 너머(+MARGIN)까지 가고도 생존(not done)이면 건넌 것으로 보고 보너스.
@@ -498,7 +504,7 @@ def serve(conn, env):
         # [DAY2 트라이1] 종료 원인 로그 — 낙사율 집계 + y_pos 임계(PIT_Y_THRESHOLD) 실측/튜닝용.
         # [DAY3 트라이1] stomps=N(그 판 밟기 횟수) 추가 — 통과율과 함께 행동 강화 효과 측정용.
         print(f"[Ep {episode:4d}] status={status:10s} maxX={max_x:5d} "
-              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} "
+              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} minY={min_y:3d} maxY={max_y:3d} "
               f"stomps={stomp_count} pitclears={pit_clear_count}", flush=True)
         # done 상태를 보냈으므로 recv 없이 위로 돌아가 reset → 첫 상태 전송
 

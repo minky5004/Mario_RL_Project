@@ -25,6 +25,8 @@ public class GameState {
     private int enemy_dist;
     /** 앞쪽 구덩이까지의 거리 단계 (0 없음 / 1 가까움 / 2 코앞). [DAY4] */
     private int pit_dist;
+    /** 마리오의 수직 이동 방향 (0 지상·정지 / 1 상승 / 2 하강). [DAY5 트라이3] */
+    private int vy_dir;
     /** 현재 점수. */
     private int score;
     /** 남은 시간. */
@@ -74,6 +76,16 @@ public class GameState {
     /** 앞쪽 구덩이까지의 거리 단계(0~2)를 설정한다. */
     public void setPitDist(int pit_dist) {
         this.pit_dist = pit_dist;
+    }
+
+    /** 마리오의 수직 이동 방향(0 지상·정지 / 1 상승 / 2 하강)을 반환한다. */
+    public int getVyDir() {
+        return vy_dir;
+    }
+
+    /** 마리오의 수직 이동 방향(0~2)을 설정한다. */
+    public void setVyDir(int vy_dir) {
+        this.vy_dir = vy_dir;
     }
 
     /** 현재 점수를 반환한다. */
@@ -133,6 +145,7 @@ public class GameState {
                 ", mario_y=" + mario_y +
                 ", enemy_dist=" + enemy_dist +
                 ", pit_dist=" + pit_dist +
+                ", vy_dir=" + vy_dir +
                 ", score=" + score +
                 ", time_left=" + time_left +
                 ", reward=" + reward +

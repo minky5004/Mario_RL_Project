@@ -43,7 +43,8 @@ RENDER = os.environ.get("RENDER", "0") == "1"
 
 # 프레임 스킵: 행동 1개를 몇 프레임 동안 유지할지. 값이 클수록 소켓 왕복이 줄어 한 판이 빨라진다.
 # (1 = 스킵 없음, 4 = 표준) — Atari/마리오 강화학습의 표준 기법.
-FRAME_SKIP = 4
+# [DAY5 트라이1] 점프 궤적 제어 해상도를 높이려 4→2 로 축소(한 판 ~2배 느려짐).
+FRAME_SKIP = 2
 
 # --- 브라우저 화면 스트리밍 설정 ---------------------------------------------
 # 게임 화면(obs RGB)을 MJPEG 로 송출한다. 브라우저에서 http://localhost:8081 로 본다.
@@ -329,7 +330,21 @@ def compute_reward(prev_x, info, done):
     return reward, status
 
 
-def build_state(info, reward, done, status, env):
+# [DAY5 트라이3] 수직 이동 방향 임계. y_pos는 위로 갈수록 커지므로 Δy>0=상승·Δy<0=하강.
+# FRAME_SKIP=2 간격 차분이라 작은 흔들림은 무시하고 방향만 본다(정점·지상은 0).
+VY_THRESH = 4
+
+
+def detect_vy_dir(dy):
+    """직전 대비 y_pos 변화량(Δy)을 수직 방향 3단계로: 0 지상·정지 / 1 상승 / 2 하강."""
+    if dy > VY_THRESH:
+        return 1      # y_pos 증가 = 위로 = 상승
+    if dy < -VY_THRESH:
+        return 2      # y_pos 감소 = 아래로 = 하강
+    return 0          # 변화 거의 없음 = 지상 또는 정점
+
+
+def build_state(info, reward, done, status, env, vy_dir=0):
     """Java GameState 모델과 같은 필드의 dict 를 만든다 (snake_case)."""
     mario_x = int(info.get("x_pos", 0))
     return {
@@ -337,6 +352,7 @@ def build_state(info, reward, done, status, env):
         "mario_y": int(info.get("y_pos", 0)),
         "enemy_dist": detect_enemy_distance(env, mario_x),
         "pit_dist": detect_pit_distance(env, mario_x),
+        "vy_dir": vy_dir,
         "score": int(info.get("score", 0)),
         "time_left": int(info.get("time", 0)),
         "reward": float(reward),
@@ -450,6 +466,9 @@ def serve(conn, env):
         set_frame(obs)
         prev_x = int(info.get("x_pos", 0))
         max_x = prev_x
+        min_y = int(info.get("y_pos", 255))            # [DAY5 트라이1] 그 판 y_pos 범위 측정(좌표계 확정용)
+        max_y = int(info.get("y_pos", 0))
+        prev_y = int(info.get("y_pos", 0))             # [DAY5 트라이3] 수직 방향 차분용 직전 y
         status = "running"
         prev_slots = active_enemies_ahead(env, prev_x)  # [DAY3] 밟기 판정용 직전 적 슬롯
         stomp_count = 0                                 # [DAY3] 그 판에서 밟은 횟수
@@ -479,6 +498,13 @@ def serve(conn, env):
             prev_x = int(info.get("x_pos", prev_x))
             prev_slots = active_enemies_ahead(env, prev_x)
             max_x = max(max_x, prev_x)
+            # [DAY5 트라이3] 직전 대비 y 차분 → 수직 방향(상승/하강). done(낙사 급변) 직전 값은 방향 왜곡되나 곧 종료라 무방.
+            cur_y = int(info.get("y_pos", prev_y))
+            vy_dir = detect_vy_dir(cur_y - prev_y)
+            prev_y = cur_y
+            if not done:                                # 낙사 death-jump(y_pos 급변)는 제외
+                min_y = min(min_y, cur_y)
+                max_y = max(max_y, cur_y)
 
             # [DAY4 트라이2] 구덩이 통과 보너스 — 앞에 구덩이가 나타나면 그 절대 x를 기억하고,
             # 마리오가 폭 너머(+MARGIN)까지 가고도 생존(not done)이면 건넌 것으로 보고 보너스.
@@ -491,13 +517,13 @@ def serve(conn, env):
                 pending_pit_x = None
 
             # ④ 결과 상태 전송 (done 이면 종료 신호)
-            state = build_state(info, reward, done, status, env)
+            state = build_state(info, reward, done, status, env, vy_dir)
             send_state(state)
 
         # [DAY2 트라이1] 종료 원인 로그 — 낙사율 집계 + y_pos 임계(PIT_Y_THRESHOLD) 실측/튜닝용.
         # [DAY3 트라이1] stomps=N(그 판 밟기 횟수) 추가 — 통과율과 함께 행동 강화 효과 측정용.
         print(f"[Ep {episode:4d}] status={status:10s} maxX={max_x:5d} "
-              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} "
+              f"endX={prev_x:5d} endY={int(info.get('y_pos', 0)):3d} minY={min_y:3d} maxY={max_y:3d} "
               f"stomps={stomp_count} pitclears={pit_clear_count}", flush=True)
         # done 상태를 보냈으므로 recv 없이 위로 돌아가 reset → 첫 상태 전송
 

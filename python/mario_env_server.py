@@ -132,6 +132,20 @@ PIT_CLEAR_BONUS = 50.0       # 통과 1회 보너스 (굼바 밟기와 통일, �
 PIT_CLEAR_MARGIN = 32        # 구덩이 시작 x로부터 이만큼 더 가야(폭 너머) 통과로 인정
 
 
+def print_reward_rules():
+    """학습 시작 시 현재 보상 기준을 한 번 로그로 찍는다(compute_reward 등과 같은 값)."""
+    print("[Reward] === 점수 기준 ===", flush=True)
+    print(f"[Reward] 전진        : +{FORWARD_SCALE} x 전진픽셀(dx)", flush=True)
+    print(f"[Reward] 후퇴        : {BACKWARD_PENALTY}", flush=True)
+    print(f"[Reward] 사망(적)    : {DEATH_PENALTY}", flush=True)
+    print(f"[Reward] 사망(낙사)  : {PIT_DEATH_PENALTY}", flush=True)
+    print(f"[Reward] 시간초과    : {TIMEOUT_PENALTY}", flush=True)
+    print(f"[Reward] 클리어      : +{CLEAR_REWARD}", flush=True)
+    print(f"[Reward] 굼바 밟기   : +{GOOMBA_STOMP_BONUS} (1회당, 누적)", flush=True)
+    print(f"[Reward] 구덩이 통과 : +{PIT_CLEAR_BONUS} (1회당, 누적)", flush=True)
+    print("[Reward] ==================", flush=True)
+
+
 def step_compat(env, action):
     """gym 구/신 API 모두 지원하는 step 래퍼.
 
@@ -545,6 +559,7 @@ def main():
 
         conn, addr = server.accept()
         print(f"[Server] Java 연결됨: {addr}", flush=True)
+        print_reward_rules()
         with conn:
             serve(conn, env)
     except (ConnectionError, BrokenPipeError) as e:

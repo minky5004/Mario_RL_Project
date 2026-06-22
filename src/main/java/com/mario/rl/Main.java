@@ -23,8 +23,8 @@ public class Main {
     private static final String HOST = "localhost";
     /** Python 서버 포트. */
     private static final int PORT = 9999;
-    /** 학습할 총 에피소드 수. */
-    private static final int MAX_EPISODES = 500;
+    /** 학습할 총 에피소드 수. [DAY6 트라이1] 500 → 1500 (예산 늘려 학습 희박 해소 검증). */
+    private static final int MAX_EPISODES = 1500;
 
     /**
      * 프로그램 진입점.

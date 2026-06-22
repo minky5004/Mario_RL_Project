@@ -61,27 +61,29 @@ public class RLAgent {
 
     /** 한 에피소드를 끝까지 진행하며 매 스텝 Q-Table을 갱신한다. */
     private void runEpisode(int episode) throws IOException {
-        // 에피소드 첫 상태 수신
+        // 에피소드 첫 상태 수신 — [DAY7 트라이2] 공통/위치 두 인덱스로 인코딩
         GameState current = socketClient.receiveGameState();
-        int state = stateEncoder.encode(current);
+        int common = stateEncoder.encodeCommon(current);
+        int local = stateEncoder.encodeLocal(current);
 
         double totalReward = 0.0;
         int maxX = current.getMarioX();
         int step = 0;
 
         while (true) {
-            // 1) 행동 선택 후 전송
-            int actionIndex = qLearning.selectAction(state);
+            // 1) 행동 선택 후 전송 (두 테이블 합산 기준)
+            int actionIndex = qLearning.selectAction(common, local);
             socketClient.sendAction(Action.fromValue(actionIndex));
 
             // 2) 행동의 결과(다음 상태·보상·종료) 수신
             GameState next = socketClient.receiveGameState();
-            int nextState = stateEncoder.encode(next);
+            int nextCommon = stateEncoder.encodeCommon(next);
+            int nextLocal = stateEncoder.encodeLocal(next);
             double reward = next.getReward();
             boolean done = next.isDone();
 
-            // 3) Q-Table 갱신 (학습)
-            qLearning.update(state, actionIndex, reward, nextState, done);
+            // 3) 두 Q-Table 동시 갱신 (학습)
+            qLearning.update(common, local, actionIndex, reward, nextCommon, nextLocal, done);
 
             // 4) 통계 누적
             totalReward += reward;
@@ -89,7 +91,8 @@ public class RLAgent {
             logger.logStep(step, Action.fromValue(actionIndex), reward);
 
             // 5) 다음 스텝 준비
-            state = nextState;
+            common = nextCommon;
+            local = nextLocal;
             step++;
 
             if (done) {

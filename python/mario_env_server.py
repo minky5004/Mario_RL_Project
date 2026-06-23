@@ -124,6 +124,50 @@ PIT_SCAN_TILES = 4         # 마리오 앞 몇 칸(16px)까지 구덩이를 살�
 PIT_DIST_DANGER = 16        # 단계2 코앞: 마리오 앞 0~16px (지금 점프해야 건넘)
 PIT_DIST_NEAR = 48          # 단계1 가까움: 16~48px (그 너머는 0 없음)
 
+# --- [DAY8 트라이1] 앞 벽(토관/계단) 거리 탐지 — 타일맵 직접 읽기 ------------
+# DAY7에서 토관(파이프)이 상태에 없어 "투명벽"이 됐다 — 토관 앞에서 enemy_dist=0·pit_dist=0·
+# vy_dir=0(지상)이라 "평지"와 같은 칸으로 인식, 점프를 못 배우고 막혀 timeout. 굼바·구덩이와
+# 같은 패턴으로 "앞 벽 거리"를 RAM 타일맵에서 직접 읽어 신호로 준다. (추측 금지 — [wall] 로그로 검증)
+#
+# 구덩이가 "지면 행(12)이 비었다"였다면 토관은 그 반대 — 지면 위로 솟은 블록이 "차있다".
+# ※ 평지 지면은 두 칸 두께(행11·12 모두 흙 — GROUND_ROW 주석 참고)라 행11은 벽이 아니라 지면이다.
+#   토관/계단은 그보다 한 칸 더 솟으므로, 지면 표면 위 첫 빈칸인 행10을 봐야 평지에선 비고 토관만 잡힌다.
+#   (행11로 잡으면 출발선 평지 전체에서 dist=2가 떠 가짜 — [wall] 검증으로 확인하고 행10으로 정정.)
+WALL_ROW = GROUND_ROW - 2    # 지면 표면 위 첫 칸(10). 평지엔 빈칸(0=하늘), 토관/계단이면 타일(≠0).
+WALL_SCAN_TILES = 4          # 마리오 앞 몇 칸(16px)까지 벽을 살필지 (≤64px)
+
+# 벽 거리 3단계(구덩이와 대칭). 0 없음 / 1 가까움 / 2 코앞. 토관도 "코앞에서 점프"가 핵심.
+WALL_DIST_DANGER = 16        # 단계2 코앞: 마리오 앞 0~16px (지금 점프해야 넘음)
+WALL_DIST_NEAR = 48          # 단계1 가까움: 16~48px (그 너머는 0 없음)
+
+
+def nearest_wall_ahead(env, mario_x):
+    """마리오 앞쪽 지면 바로 위 행(WALL_ROW)이 막힌 가장 가까운 칸까지 거리(px)를 반환. 없으면 None.
+
+    구덩이 nearest_pit_ahead 와 대칭 — 앞 칸을 16px 단위로 훑어 첫 솟은 블록(토관/계단)을 찾는다.
+    """
+    ram = get_ram(env)
+    if ram is None:
+        return None
+    for k in range(1, WALL_SCAN_TILES + 1):
+        if read_tile(ram, mario_x + k * 16, WALL_ROW) != 0:   # 지면 위 칸이 막힘 = 벽
+            return k * 16
+    return None
+
+
+def detect_wall_distance(env, mario_x):
+    """마리오 앞 가장 가까운 벽까지 거리를 3단계로 매핑한다. 0 없음 / 1 가까움 / 2 코앞.
+
+    구덩이 detect_pit_distance 와 대칭(단계 3개 동일).
+    """
+    nearest = nearest_wall_ahead(env, mario_x)
+    if nearest is None or nearest > WALL_DIST_NEAR:
+        return 0
+    if nearest <= WALL_DIST_DANGER:
+        return 2
+    return 1
+
+
 # --- [DAY4 트라이2] 구덩이 통과 보너스 -------------------------------------
 # 구덩이를 무사히 건너면 보너스. 굼바 밟기(detect_stomp)와 대칭 — 앞에 나타난 구덩이의 절대 x를
 # 기억해, 마리오가 그 너머(폭+여유)까지 가고도 생존하면 "통과"로 본다. 빠지면 done(dead_pit)이라
@@ -366,6 +410,7 @@ def build_state(info, reward, done, status, env, vy_dir=0):
         "mario_y": int(info.get("y_pos", 0)),
         "enemy_dist": detect_enemy_distance(env, mario_x),
         "pit_dist": detect_pit_distance(env, mario_x),
+        "wall_dist": detect_wall_distance(env, mario_x),   # [DAY8 트라이1] 앞 벽(토관/계단) 거리
         "vy_dir": vy_dir,
         "score": int(info.get("score", 0)),
         "time_left": int(info.get("time", 0)),

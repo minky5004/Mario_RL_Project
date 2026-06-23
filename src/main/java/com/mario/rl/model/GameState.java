@@ -25,6 +25,8 @@ public class GameState {
     private int enemy_dist;
     /** 앞쪽 구덩이까지의 거리 단계 (0 없음 / 1 가까움 / 2 코앞). [DAY4] */
     private int pit_dist;
+    /** 앞쪽 벽(토관/계단)까지의 거리 단계 (0 없음 / 1 가까움 / 2 코앞). [DAY8] */
+    private int wall_dist;
     /** 마리오의 수직 이동 방향 (0 지상·정지 / 1 상승 / 2 하강). [DAY5 트라이3] */
     private int vy_dir;
     /** 현재 점수. */
@@ -76,6 +78,16 @@ public class GameState {
     /** 앞쪽 구덩이까지의 거리 단계(0~2)를 설정한다. */
     public void setPitDist(int pit_dist) {
         this.pit_dist = pit_dist;
+    }
+
+    /** 앞쪽 벽(토관/계단)까지의 거리 단계(0~2)를 반환한다. */
+    public int getWallDist() {
+        return wall_dist;
+    }
+
+    /** 앞쪽 벽(토관/계단)까지의 거리 단계(0~2)를 설정한다. */
+    public void setWallDist(int wall_dist) {
+        this.wall_dist = wall_dist;
     }
 
     /** 마리오의 수직 이동 방향(0 지상·정지 / 1 상승 / 2 하강)을 반환한다. */
@@ -145,6 +157,7 @@ public class GameState {
                 ", mario_y=" + mario_y +
                 ", enemy_dist=" + enemy_dist +
                 ", pit_dist=" + pit_dist +
+                ", wall_dist=" + wall_dist +
                 ", vy_dir=" + vy_dir +
                 ", score=" + score +
                 ", time_left=" + time_left +

@@ -24,6 +24,13 @@ application {
     mainClass = 'com.mario.rl.Main'
 }
 
+// [DAY9] `gradlew run` 의 -Dmario.* 시스템 프로퍼티를 애플리케이션 JVM 으로 전달한다.
+// (application 플러그인의 run 은 기본적으로 Gradle JVM 프로퍼티를 앱에 넘기지 않음)
+//   예: ./gradlew run -Dmario.seed=1 -Dmario.save=q-seed1.bin
+run {
+    systemProperties System.getProperties().findAll { it.key.toString().startsWith('mario.') }
+}
+
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17

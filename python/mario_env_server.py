@@ -41,6 +41,11 @@ PORT = 9999
 # 화면 렌더링 여부 (헤드리스 기본 OFF). WSL/로컬에서 보고 싶으면 RENDER=1.
 RENDER = os.environ.get("RENDER", "0") == "1"
 
+# [DAY9 작업1] 시드 N회 반복 비교용 — MARIO_SEED 가 있으면 env 를 그 시드로 고정한다(없으면 비결정적).
+#   SMB 1-1 은 같은 행동열이면 결정적이라 분산의 주범은 Java 탐험이지만, 재현성을 위해 env 도 고정.
+_seed_env = os.environ.get("MARIO_SEED", "").strip()
+MARIO_SEED = int(_seed_env) if _seed_env else None
+
 # 프레임 스킵: 행동 1개를 몇 프레임 동안 유지할지. 값이 클수록 소켓 왕복이 줄어 한 판이 빨라진다.
 # (1 = 스킵 없음, 4 = 표준) — Atari/마리오 강화학습의 표준 기법.
 # [DAY5 트라이1] 점프 궤적 제어 해상도를 높이려 4→2 로 축소(한 판 ~2배 느려짐).
@@ -54,9 +59,12 @@ STREAM_SCALE = 3        # 240x256 화면을 3배 확대해 보기 좋게
 STREAM_FPS = 30
 
 # --- 행동 매핑 ---------------------------------------------------------------
-# Java 의 Action enum(0~5)과 1:1 로 맞춘 nes-py 버튼 조합.
-#   0 NOOP, 1 RIGHT, 2 RIGHT_JUMP, 3 JUMP, 4 LEFT, 5 RIGHT_RUN_JUMP
+# Java 의 Action enum(0~6)과 1:1 로 맞춘 nes-py 버튼 조합.
+#   0 NOOP, 1 RIGHT, 2 RIGHT_JUMP, 3 JUMP, 4 LEFT, 5 RIGHT_RUN_JUMP, 6 RIGHT_LONG_JUMP
 #   (A = 점프, B = 달리기)
+# [DAY9 트라이1] 6 RIGHT_LONG_JUMP 는 버튼 조합이 2 RIGHT_JUMP 와 같은 right+A 다.
+#   차이는 '점프 길이' 하나뿐 — 이 행동만 A를 LONG_JUMP_FRAMES 만큼 길게 유지해(아래 step_with_skip)
+#   더 멀리·높이 뛴다(매크로 행동). 차이를 점프 길이로만 격리해 효과를 깨끗이 측정.
 CUSTOM_MOVEMENT = [
     ["NOOP"],
     ["right"],
@@ -64,7 +72,12 @@ CUSTOM_MOVEMENT = [
     ["A"],
     ["left"],
     ["right", "B", "A"],
+    ["right", "A"],
 ]
+
+# [DAY9 트라이1] 긴 점프 설정 — 이 행동 인덱스일 때만 A를 더 오래 누른다.
+LONG_JUMP_ACTION = 6        # CUSTOM_MOVEMENT 의 RIGHT_LONG_JUMP 인덱스
+LONG_JUMP_FRAMES = 8        # A 유지 프레임(= FRAME_SKIP 2의 4배). 일반 행동은 FRAME_SKIP 그대로.
 
 # --- 보상 상수 (docs/03-보상설계.md 의 표와 일치) ----------------------------
 FORWARD_SCALE = 0.1      # 전진 1px 당 보상
@@ -210,10 +223,14 @@ def step_with_skip(env, action):
     매 프레임 화면을 갱신(스트리밍 부드럽게)하되, 소켓 왕복은 이 함수 1회당 1번만 일어나므로
     한 판이 약 FRAME_SKIP 배 빨리 끝난다. 보상은 서버가 x_pos 변화로 직접 계산하므로
     (compute_reward) 여기서 누적하지 않고, 스킵 후의 최종 obs/info 만 반환한다.
+
+    [DAY9 트라이1] 긴 점프(LONG_JUMP_ACTION)만 A를 LONG_JUMP_FRAMES 만큼 더 길게 유지한다
+    (= 더 멀리·높이 뛰는 매크로 행동). 다른 행동은 FRAME_SKIP 그대로.
     """
+    frames = LONG_JUMP_FRAMES if action == LONG_JUMP_ACTION else FRAME_SKIP
     obs = info = None
     done = False
-    for _ in range(max(1, FRAME_SKIP)):
+    for _ in range(max(1, frames)):
         obs, _, done, info = step_compat(env, action)
         render_safe(env)
         set_frame(obs)
@@ -593,6 +610,18 @@ def main():
     try:
         env = gym_super_mario_bros.make("SuperMarioBros-1-1-v0")
         env = JoypadSpace(env, CUSTOM_MOVEMENT)
+
+        # [DAY9 작업1] 시드 고정(best-effort) — gym 버전별로 seed API 가 달라 둘 다 시도.
+        if MARIO_SEED is not None:
+            try:
+                env.seed(MARIO_SEED)
+            except (AttributeError, TypeError):
+                pass
+            try:
+                env.action_space.seed(MARIO_SEED)
+            except (AttributeError, TypeError):
+                pass
+            print(f"[Server] 시드 고정: MARIO_SEED={MARIO_SEED}", flush=True)
 
         start_stream_server()  # 브라우저 화면 스트리밍 시작
 

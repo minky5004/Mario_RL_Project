@@ -20,10 +20,16 @@ public enum Action {
     /** 왼쪽 이동. */
     LEFT(4),
     /** 오른쪽 달리기 + 점프. */
-    RIGHT_RUN_JUMP(5);
+    RIGHT_RUN_JUMP(5),
+    /**
+     * 오른쪽 + 긴 점프. [DAY9 트라이1] 버튼 조합은 {@link #RIGHT_JUMP}와 같은 {@code right+A}지만,
+     * Python이 이 행동만 A를 {@code FRAME_SKIP}보다 길게(8프레임) 유지해 더 멀리·높이 뛴다(매크로 행동).
+     * 짧은 점프로 사거리가 안 닿던 큰 토관·넓은 구덩이를 넘기 위함.
+     */
+    RIGHT_LONG_JUMP(6);
 
-    /** 전체 행동 개수 (Q-Table의 행동 차원 크기). */
-    public static final int ACTION_SIZE = 6;
+    /** 전체 행동 개수 (Q-Table의 행동 차원 크기). [DAY9] 긴 점프 추가로 6 → 7. */
+    public static final int ACTION_SIZE = 7;
 
     /** Python 게임 환경의 액션 인덱스. */
     private final int value;

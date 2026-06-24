@@ -1,7 +1,10 @@
 package com.mario.rl;
 
+import com.mario.rl.agent.Brain;
 import com.mario.rl.agent.QLearning;
 import com.mario.rl.agent.RLAgent;
+import com.mario.rl.agent.SARSA;
+import com.mario.rl.agent.TabularBrain;
 import com.mario.rl.network.SocketClient;
 import com.mario.rl.util.Logger;
 import com.mario.rl.util.StateEncoder;
@@ -34,45 +37,42 @@ public class Main {
     public static void main(String[] args) {
         System.out.println("=== Mario RL (Q-Learning) 학습 시작 ===");
 
-        // [DAY9] 실행 옵션 — 시스템 프로퍼티로 전달(기본은 기존 동작 = 시드 없음·로드/저장 없음, 회귀 방지).
-        //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용, 작업1)
-        //   -Dmario.load=경로 : 시작 시 Q-Table 로드(이어학습, 작업3)
-        //   -Dmario.save=경로 : 학습 종료 시 Q-Table 저장(작업3)
+        // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
+        //   -Dmario.algo=qlearning|sarsa : 알고리즘 선택 [DAY10]
+        //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
+        //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
+        //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
+        //   -Dmario.load/save=경로 : Q-Table 로드/저장(표 알고리즘만)
+        String algo = System.getProperty("mario.algo", "qlearning").trim().toLowerCase();
         Long seed = parseLongProperty("mario.seed");
         String loadPath = System.getProperty("mario.load");
         String savePath = System.getProperty("mario.save");
         Long portProp = parseLongProperty("mario.port");
         int port = (portProp != null) ? portProp.intValue() : DEFAULT_PORT;
-        // [DAY9 트라이1 베이스라인] 쓰는 행동 수. 미지정/7=긴 점프 포함, 6=긴 점프 끔(DAY8 매칭).
         Long actionsProp = parseLongProperty("mario.actions");
 
         try (SocketClient socketClient = new SocketClient(HOST, port)) {
-            QLearning qLearning;
-            if (seed != null && actionsProp != null) {
-                qLearning = new QLearning(seed, actionsProp.intValue());
-            } else if (seed != null) {
-                qLearning = new QLearning(seed);
-            } else {
-                qLearning = new QLearning();
-            }
+            Brain brain = createBrain(algo, seed, actionsProp);
+            System.out.println("[Main] 알고리즘: " + algo);
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
             }
             if (actionsProp != null) {
                 System.out.println("[Main] 행동 수 제한: " + actionsProp + " (긴 점프 " + (actionsProp >= 7 ? "포함" : "제외") + ")");
             }
-            if (loadPath != null) {
-                qLearning.load(loadPath);
+            // 저장/로드는 표(테이블) 알고리즘에서만 지원.
+            if (loadPath != null && brain instanceof TabularBrain tb) {
+                tb.load(loadPath);
                 System.out.println("[Main] Q-Table 로드: " + loadPath);
             }
             StateEncoder stateEncoder = new StateEncoder();
             Logger logger = new Logger();
 
-            RLAgent agent = new RLAgent(qLearning, socketClient, stateEncoder, logger);
+            RLAgent agent = new RLAgent(brain, socketClient, stateEncoder, logger);
             agent.train(MAX_EPISODES);
 
-            if (savePath != null) {
-                qLearning.save(savePath);
+            if (savePath != null && brain instanceof TabularBrain tb) {
+                tb.save(savePath);
                 System.out.println("[Main] Q-Table 저장: " + savePath);
             }
             System.out.println("=== 학습 종료 ===");
@@ -82,6 +82,28 @@ public class Main {
             Thread.currentThread().interrupt();
             System.err.println("[Main] 연결 대기 중 중단됨: " + e.getMessage());
         }
+    }
+
+    /**
+     * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
+     *
+     * @param algo    "qlearning" | "sarsa" (그 외는 qlearning 으로 폴백)
+     * @param seed    시드(null이면 비결정적)
+     * @param actions 쓰는 행동 수(null이면 전체)
+     * @return 생성된 {@link Brain}
+     */
+    private static Brain createBrain(String algo, Long seed, Long actions) {
+        boolean sarsa = "sarsa".equals(algo);
+        if (seed != null && actions != null) {
+            return sarsa ? new SARSA(seed, actions.intValue()) : new QLearning(seed, actions.intValue());
+        }
+        if (seed != null) {
+            return sarsa ? new SARSA(seed) : new QLearning(seed);
+        }
+        if (actions != null) {
+            return sarsa ? new SARSA(actions.intValue()) : new QLearning(actions.intValue());
+        }
+        return sarsa ? new SARSA() : new QLearning();
     }
 
     /** 시스템 프로퍼티를 {@code Long}으로 파싱한다. 없거나 숫자가 아니면 {@code null}. */

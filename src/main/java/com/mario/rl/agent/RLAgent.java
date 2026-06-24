@@ -26,7 +26,7 @@ import java.io.IOException;
  */
 public class RLAgent {
 
-    private final QLearning qLearning;
+    private final Brain brain;
     private final SocketClient socketClient;
     private final StateEncoder stateEncoder;
     private final Logger logger;
@@ -34,14 +34,14 @@ public class RLAgent {
     /**
      * 학습에 필요한 협력 객체들을 주입받아 에이전트를 생성한다.
      *
-     * @param qLearning    Q-Learning 알고리즘
+     * @param brain        두뇌(알고리즘) — Q-Learning·SARSA 등 {@link Brain} 구현 [DAY10]
      * @param socketClient Python 서버와의 통신 클라이언트
      * @param stateEncoder 상태 인코더
      * @param logger       학습 로거
      */
-    public RLAgent(QLearning qLearning, SocketClient socketClient,
+    public RLAgent(Brain brain, SocketClient socketClient,
                    StateEncoder stateEncoder, Logger logger) {
-        this.qLearning = qLearning;
+        this.brain = brain;
         this.socketClient = socketClient;
         this.stateEncoder = stateEncoder;
         this.logger = logger;
@@ -59,21 +59,26 @@ public class RLAgent {
         }
     }
 
-    /** 한 에피소드를 끝까지 진행하며 매 스텝 Q-Table을 갱신한다. */
+    /**
+     * 한 에피소드를 끝까지 진행하며 매 스텝 학습한다.
+     *
+     * <p>[DAY10] SARSA식 루프 — 다음 행동 {@code nextAction}을 학습 *전에* 골라 {@link Brain#learn}에 넘긴다.
+     * on-policy(SARSA)는 그 값을, off-policy(Q-Learning)는 무시하고 max를 쓰므로 같은 루프로 둘 다 표현된다.</p>
+     */
     private void runEpisode(int episode) throws IOException {
         // 에피소드 첫 상태 수신 — [DAY7 트라이2] 공통/위치 두 인덱스로 인코딩
         GameState current = socketClient.receiveGameState();
         int common = stateEncoder.encodeCommon(current);
         int local = stateEncoder.encodeLocal(current);
+        int action = brain.selectAction(common, local);
 
         double totalReward = 0.0;
         int maxX = current.getMarioX();
         int step = 0;
 
         while (true) {
-            // 1) 행동 선택 후 전송 (두 테이블 합산 기준)
-            int actionIndex = qLearning.selectAction(common, local);
-            socketClient.sendAction(Action.fromValue(actionIndex));
+            // 1) 현재 행동 전송
+            socketClient.sendAction(Action.fromValue(action));
 
             // 2) 행동의 결과(다음 상태·보상·종료) 수신
             GameState next = socketClient.receiveGameState();
@@ -82,17 +87,21 @@ public class RLAgent {
             double reward = next.getReward();
             boolean done = next.isDone();
 
-            // 3) 두 Q-Table 동시 갱신 (학습)
-            qLearning.update(common, local, actionIndex, reward, nextCommon, nextLocal, done);
+            // 3) 다음 행동을 먼저 고른다(SARSA 부트스트랩용). 종료면 의미 없음.
+            int nextAction = done ? -1 : brain.selectAction(nextCommon, nextLocal);
 
-            // 4) 통계 누적
+            // 4) 학습 (알고리즘에 따라 nextAction 사용/무시)
+            brain.learn(common, local, action, reward, nextCommon, nextLocal, nextAction, done);
+
+            // 5) 통계 누적
             totalReward += reward;
             maxX = Math.max(maxX, next.getMarioX());
-            logger.logStep(step, Action.fromValue(actionIndex), reward);
+            logger.logStep(step, Action.fromValue(action), reward);
 
-            // 5) 다음 스텝 준비
+            // 6) 다음 스텝 준비
             common = nextCommon;
             local = nextLocal;
+            action = nextAction;
             step++;
 
             if (done) {
@@ -101,7 +110,7 @@ public class RLAgent {
         }
 
         // 에피소드 종료: 탐험 비율 감소 후 요약 로그
-        qLearning.decayEpsilon();
-        logger.logEpisode(episode, totalReward, maxX, qLearning.getEpsilon());
+        brain.endEpisode();
+        logger.logEpisode(episode, totalReward, maxX, brain.getEpsilon());
     }
 }

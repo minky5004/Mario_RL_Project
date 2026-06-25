@@ -3,6 +3,7 @@ package com.mario.rl;
 import com.mario.rl.agent.Brain;
 import com.mario.rl.agent.QLearning;
 import com.mario.rl.agent.RLAgent;
+import com.mario.rl.agent.RandomBrain;
 import com.mario.rl.agent.SARSA;
 import com.mario.rl.agent.TabularBrain;
 import com.mario.rl.network.SocketClient;
@@ -38,7 +39,7 @@ public class Main {
         System.out.println("=== Mario RL (Q-Learning) 학습 시작 ===");
 
         // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
-        //   -Dmario.algo=qlearning|sarsa : 알고리즘 선택 [DAY10]
+        //   -Dmario.algo=qlearning|sarsa|random : 알고리즘 선택 [DAY10] (random=무학습 기준선)
         //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
         //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
         //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
@@ -87,23 +88,34 @@ public class Main {
     /**
      * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
      *
-     * @param algo    "qlearning" | "sarsa" (그 외는 qlearning 으로 폴백)
+     * @param algo    "qlearning" | "sarsa" | "random" (그 외는 qlearning 으로 폴백)
      * @param seed    시드(null이면 비결정적)
      * @param actions 쓰는 행동 수(null이면 전체)
      * @return 생성된 {@link Brain}
      */
     private static Brain createBrain(String algo, Long seed, Long actions) {
-        boolean sarsa = "sarsa".equals(algo);
-        if (seed != null && actions != null) {
-            return sarsa ? new SARSA(seed, actions.intValue()) : new QLearning(seed, actions.intValue());
+        boolean hasSeed = seed != null;
+        boolean hasActions = actions != null;
+        long s = hasSeed ? seed : 0L;
+        int a = hasActions ? actions.intValue() : 0;
+        switch (algo) {
+            case "sarsa":
+                if (hasSeed && hasActions) return new SARSA(s, a);
+                if (hasSeed) return new SARSA(s);
+                if (hasActions) return new SARSA(a);
+                return new SARSA();
+            case "random":
+                if (hasSeed && hasActions) return new RandomBrain(s, a);
+                if (hasSeed) return new RandomBrain(s);
+                if (hasActions) return new RandomBrain(a);
+                return new RandomBrain();
+            case "qlearning":
+            default:
+                if (hasSeed && hasActions) return new QLearning(s, a);
+                if (hasSeed) return new QLearning(s);
+                if (hasActions) return new QLearning(a);
+                return new QLearning();
         }
-        if (seed != null) {
-            return sarsa ? new SARSA(seed) : new QLearning(seed);
-        }
-        if (actions != null) {
-            return sarsa ? new SARSA(actions.intValue()) : new QLearning(actions.intValue());
-        }
-        return sarsa ? new SARSA() : new QLearning();
     }
 
     /** 시스템 프로퍼티를 {@code Long}으로 파싱한다. 없거나 숫자가 아니면 {@code null}. */

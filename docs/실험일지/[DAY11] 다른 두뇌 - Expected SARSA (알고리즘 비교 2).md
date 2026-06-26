@@ -60,7 +60,7 @@ SARSA는 다음 상태를 "**실제로 고른** 행동 하나"의 Q로 부트스
 
 *(4개 알고리즘 모두 maxX를 Java·Python 양쪽 로그에서 교차검증 — 불일치 0판. 같은 시드 재학습이라 QL·SARSA·Random 숫자는 기존 보드값을 결정적으로 재현. 원본 로그는 `mario_training_logs/day10/`에 영구 보관 → 재학습 없이 그래프 재생성 가능.)*
 
-![4 알고리즘 비교](images/day10-algorithm-comparison.png)
+![4 알고리즘 비교](images/day11-algorithm-comparison.png)
 
 - **본선(clear·거리·best)은 또 무승부.** Expected SARSA clear 54.6은 평균이 가장 높아 보이지만 std가 50(평균만큼) — QL·SARSA와 분포 완전히 겹친다. 여기서도 **seed4가 폭발**(133, DAY9 seed4 재현) = 시드 영향 ≫ 알고리즘. 평균 Max X·best도 동급.
 - **바닥선 위로는 분리.** Expected SARSA 후반 거리 최솟값 707 > Random 최댓값 667 → 진짜 학습(분산 아님) 확인.

@@ -24,7 +24,7 @@
 |---|---|---|:---:|
 | **Q-Learning** | 매 스텝, 다음 상태에서 *가장 좋은* 행동을 가정(`max`)해 Q값을 갱신 | **off-policy** — 탐험과 무관하게 최적 정책을 학습, 공격적 | ✅ |
 | **SARSA** | 다음 상태에서 *실제로 고른* 행동의 Q값으로 갱신 | **on-policy** — 탐험의 위험을 학습에 반영해 더 보수적·안전 | ✅ |
-| **Expected SARSA** | 다음 행동들의 *기대값*(정책 확률로 가중 평균)으로 갱신 | 분산을 줄여 더 안정적, Q-Learning의 과대평가 편향도 완화 | ⏳ 예정 |
+| **Expected SARSA** | 다음 행동들의 *기대값*(정책 확률로 가중 평균 `(1-ε)·max + ε·mean`)으로 갱신 | 분산을 줄여 더 안정적 — 실측: SARSA의 timeout 성향을 Q-Learning 쪽으로 완화 | ✅ |
 | **Monte Carlo** | 한 *에피소드가 끝난 뒤* 실제 받은 보상 총합으로 갱신(부트스트랩 없음) | 편향은 없지만 분산이 크고 느림 — 에피소드형 문제 전용 | ⏳ 예정 |
 | **랜덤** | 학습 없이 무작위 행동 | 다른 알고리즘을 견주는 **바닥 기준선** (깃발 0·거리 절반) | ✅ |
 | **GA · ES (진화)** | 정책 *모집단*을 굴려 적합도(멀리·clear) 측정 → 상위 선택 → 돌연변이로 다음 세대 | 그래디언트·Q값이 필요 없는 **블랙박스**, 모집단 자체가 탐험을 촉진 | ⏳ 예정 |
@@ -76,7 +76,7 @@ docker run --rm -p 9999:9999 -p 8081:8081 mario-env   # 8081 = 브라우저 화�
 
 | 옵션 | 뜻 | 기본 |
 |---|---|---|
-| `-Dmario.algo=qlearning\|sarsa\|random` | 알고리즘 선택 (random=무학습 기준선) | `qlearning` |
+| `-Dmario.algo=qlearning\|sarsa\|expected_sarsa\|random` | 알고리즘 선택 (random=무학습 기준선) | `qlearning` |
 | `-Dmario.seed=N` | 난수 시드 고정(재현·시드 비교) | 없음 |
 | `-Dmario.port=N` | 서버 포트(병렬 실행용) | 9999 |
 | `-Dmario.actions=6` | 쓰는 행동 수(6 = 긴 점프 끔) | 7 |
@@ -97,8 +97,10 @@ Mario_RL_Project/
 │   ├── agent/                   # 두뇌 · 학습 루프
 │   │   ├── Brain.java           #   두뇌 공통 인터페이스
 │   │   ├── TabularBrain.java    #   표 기반 공통 베이스(두 테이블·ε·저장/로드)
-│   │   ├── QLearning.java       #   off-policy TD
-│   │   ├── SARSA.java           #   on-policy TD
+│   │   ├── QLearning.java       #   off-policy TD (bootstrap=max)
+│   │   ├── SARSA.java           #   on-policy TD (bootstrap=실제 다음 행동)
+│   │   ├── ExpectedSARSA.java   #   on-policy TD (bootstrap=정책 기댓값)
+│   │   ├── RandomBrain.java     #   무학습 바닥 기준선
 │   │   └── RLAgent.java         #   학습 루프(지휘)
 │   ├── model/                   # Action(행동) · GameState(상태)
 │   ├── network/                 # SocketClient(소켓 통신)

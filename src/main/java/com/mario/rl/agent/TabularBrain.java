@@ -43,8 +43,8 @@ public abstract class TabularBrain implements Brain {
     private static final double LEARNING_RATE = 0.1;
     /** 테이블별 학습률 — TD 오차를 두 테이블(타일)에 나눠 적용(α/타일수). */
     private static final double TABLE_LR = LEARNING_RATE / 2.0;
-    /** 할인율 (γ). */
-    private static final double DISCOUNT_FACTOR = 0.99;
+    /** 할인율 (γ). [DAY12] Monte Carlo도 return 계산에 쓰므로 protected. */
+    protected static final double DISCOUNT_FACTOR = 0.99;
     /** epsilon 초기값 (탐험 비율). */
     private static final double INITIAL_EPSILON = 1.0;
     /** 에피소드마다 곱해지는 epsilon 감쇠율. */
@@ -101,11 +101,25 @@ public abstract class TabularBrain implements Brain {
     @Override
     public void learn(int common, int local, int action, double reward,
                       int nextCommon, int nextLocal, int nextAction, boolean done) {
-        double q = qCommon[common][action] + qLocal[local][action];
         double target = done
                 ? reward
                 : reward + DISCOUNT_FACTOR * bootstrap(nextCommon, nextLocal, nextAction);
-        double delta = target - q;
+        updateToward(common, local, action, target);
+    }
+
+    /**
+     * 한 (상태, 행동)의 두 테이블 값을 {@code target}쪽으로 α/2씩 당긴다. [DAY12]
+     *
+     * <p>TD 갱신({@link #learn})과 Monte Carlo의 return 갱신이 공유하는 갱신식 —
+     * 차이는 "target을 무엇으로 주느냐"뿐이다(TD는 {@code reward+γ·bootstrap}, MC는 실제 return G).</p>
+     *
+     * <pre>
+     * δ = target - (qCommon[c][a] + qLocal[l][a])
+     * qCommon[c][a] += (α/2)·δ ;  qLocal[l][a] += (α/2)·δ
+     * </pre>
+     */
+    protected void updateToward(int common, int local, int action, double target) {
+        double delta = target - (qCommon[common][action] + qLocal[local][action]);
         qCommon[common][action] += TABLE_LR * delta;
         qLocal[local][action] += TABLE_LR * delta;
     }

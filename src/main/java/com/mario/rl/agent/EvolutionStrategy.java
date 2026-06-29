@@ -46,8 +46,15 @@ public class EvolutionStrategy implements Brain {
 
     /** 한 세대의 자식 수(λ) — 부모에서 노이즈로 파생되는 표본 수. 1500판 ÷ 30 = 50세대(GA와 동일 예산). */
     private static final int POPULATION_SIZE = 30;
-    /** 노이즈 세기(σ) — 부모에 더하는 가우시안 노이즈의 표준편차. 탐험 폭을 정한다. */
-    private static final double SIGMA = 0.1;
+    /**
+     * 노이즈 세기(σ) — 부모에 더하는 가우시안 노이즈의 표준편차. 탐험 폭을 정한다.
+     *
+     * <p>처음 σ=0.1(GA <i>초기화</i> σ에 맞춤)로 돌렸더니 2/5 시드가 <b>제자리 collapse</b>했다 —
+     * 부모가 출발 상태에서 argmax=NOOP(행동 0)로 수렴하면 σ=0.1로는 노이즈가 그걸 못 뒤집어
+     * 모든 자식이 똑같이 timeout(−50) → 적합도 분산 0 → 기울기 0 → 탈출 불가능한 고정점.
+     * ES의 섭동 σ는 GA의 <i>돌연변이</i> σ(0.5) 역할에 가까우므로 0.3으로 키워 NOOP 함정을 벗어나게 한다.</p>
+     */
+    private static final double SIGMA = 0.3;
     /** 학습률(α) — 추정한 기울기 방향으로 부모를 옮기는 한 걸음 크기. */
     private static final double LEARNING_RATE = 0.05;
 

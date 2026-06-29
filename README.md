@@ -28,7 +28,7 @@
 | **Monte Carlo** | 한 *에피소드가 끝난 뒤* 실제 받은 보상 총합으로 갱신(부트스트랩 없음) | 편향은 없지만 분산이 크고 느림 — 실측: 본선에서 TD에 *처음으로 밀림*, timeout이 Random급(끝을 못 냄). 깃발엔 닿음 | ✅ |
 | **랜덤** | 학습 없이 무작위 행동 | 다른 알고리즘을 견주는 **바닥 기준선** (깃발 0·거리 절반) | ✅ |
 | **GA (유전 알고리즘)** | 정책 *모집단*을 굴려 적합도(한 판 보상 합) 측정 → 상위 선택·교배·돌연변이로 다음 세대(Q값·그래디언트 없음) | 그래디언트·Q값이 필요 없는 **블랙박스** — 실측: 이 설정(8천 파라미터·30×50세대)에선 *바닥선(Random)보다도 못함*(깃발 0·timeout 2배). 진화 자체가 아니라 큰 파라미터·빈약한 예산·신용할당 부재의 합작 | ✅ |
-| **ES (진화 전략)** | 한 부모 + 가우시안 노이즈 자식들 → 적합도 가중 평균으로 부모 갱신 | GA가 "구현 탓"인지 "진화 패밀리 탓"인지 가르는 대조군 | ⏳ 예정 |
+| **ES (진화 전략)** | 한 부모 + 가우시안 노이즈 자식들(OpenAI-ES) → 적합도 가중 노이즈 평균으로 부모를 한 걸음(기울기 추정) | 실측: **전 지표 최하위·유일하게 시간이 갈수록 *퇴보*** (중반 best 905 탐험 후 후반 제자리로 collapse). 단일 부모가 "안전 timeout" 분지로 빨려듦 → GA보다도 아래. GA·ES 두 점으로 *"이 환경에선 진화 패밀리 자체가 약함"* 확정 | ✅ |
 
 > **on-policy / off-policy** = "내가 실제로 한 행동대로 배우나(보수적)" vs "최선을 가정하고 배우나(공격적)".
 > **부트스트랩** = 다음 상태의 *추정값*으로 현재를 갱신(TD) ↔ 끝까지 가본 *실제 결과*로 갱신(Monte Carlo).
@@ -77,7 +77,7 @@ docker run --rm -p 9999:9999 -p 8081:8081 mario-env   # 8081 = 브라우저 화�
 
 | 옵션 | 뜻 | 기본 |
 |---|---|---|
-| `-Dmario.algo=qlearning\|sarsa\|expected_sarsa\|monte_carlo\|random\|ga` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘) | `qlearning` |
+| `-Dmario.algo=qlearning\|sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|es` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘, es=진화 전략) | `qlearning` |
 | `-Dmario.seed=N` | 난수 시드 고정(재현·시드 비교) | 없음 |
 | `-Dmario.port=N` | 서버 포트(병렬 실행용) | 9999 |
 | `-Dmario.actions=6` | 쓰는 행동 수(6 = 긴 점프 끔) | 7 |
@@ -102,7 +102,8 @@ Mario_RL_Project/
 │   │   ├── SARSA.java           #   on-policy TD (bootstrap=실제 다음 행동)
 │   │   ├── ExpectedSARSA.java   #   on-policy TD (bootstrap=정책 기댓값)
 │   │   ├── MonteCarlo.java      #   부트스트랩 없음(에피소드 끝 return G로 갱신)
-│   │   ├── GeneticAlgorithm.java#   진화(모집단·적합도·교배·돌연변이, Q값 없음)
+│   │   ├── GeneticAlgorithm.java#   진화 GA(모집단·적합도·교배·돌연변이, Q값 없음)
+│   │   ├── EvolutionStrategy.java#  진화 ES(한 부모+노이즈 자식→적합도 가중 평균, OpenAI-ES)
 │   │   ├── RandomBrain.java     #   무학습 바닥 기준선
 │   │   └── RLAgent.java         #   학습 루프(지휘)
 │   ├── model/                   # Action(행동) · GameState(상태)

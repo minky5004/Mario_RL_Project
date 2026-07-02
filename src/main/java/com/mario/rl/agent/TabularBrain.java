@@ -41,8 +41,11 @@ public abstract class TabularBrain implements Brain {
 
     /** 학습률 (α). */
     private static final double LEARNING_RATE = 0.1;
-    /** 테이블별 학습률 — TD 오차를 두 테이블(타일)에 나눠 적용(α/타일수). */
-    private static final double TABLE_LR = LEARNING_RATE / 2.0;
+    /**
+     * 테이블별 학습률 — TD 오차를 두 테이블(타일)에 나눠 적용(α/타일수). [DAY15]
+     * SARSA(λ)가 적격흔적 갱신(α/2·δ·e)에 직접 쓰므로 protected.
+     */
+    protected static final double TABLE_LR = LEARNING_RATE / 2.0;
     /** 할인율 (γ). [DAY12] Monte Carlo도 return 계산에 쓰므로 protected. */
     protected static final double DISCOUNT_FACTOR = 0.99;
     /** epsilon 초기값 (탐험 비율). */

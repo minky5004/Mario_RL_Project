@@ -9,6 +9,7 @@ import com.mario.rl.agent.QLearning;
 import com.mario.rl.agent.RLAgent;
 import com.mario.rl.agent.RandomBrain;
 import com.mario.rl.agent.SARSA;
+import com.mario.rl.agent.SARSALambda;
 import com.mario.rl.agent.TabularBrain;
 import com.mario.rl.network.SocketClient;
 import com.mario.rl.util.Logger;
@@ -50,6 +51,7 @@ public class Main {
         //   -Dmario.load/save=경로 : Q-Table 로드/저장(표 알고리즘만)
         String algo = System.getProperty("mario.algo", "qlearning").trim().toLowerCase();
         Long seed = parseLongProperty("mario.seed");
+        Double lambda = parseDoubleProperty("mario.lambda");  // [DAY15] SARSA(λ) 적격흔적 λ (미지정=0.9)
         String loadPath = System.getProperty("mario.load");
         String savePath = System.getProperty("mario.save");
         Long portProp = parseLongProperty("mario.port");
@@ -57,10 +59,13 @@ public class Main {
         Long actionsProp = parseLongProperty("mario.actions");
 
         try (SocketClient socketClient = new SocketClient(HOST, port)) {
-            Brain brain = createBrain(algo, seed, actionsProp);
+            Brain brain = createBrain(algo, seed, actionsProp, lambda);
             System.out.println("[Main] 알고리즘: " + algo);
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
+            }
+            if (algo.equals("sarsa_lambda")) {
+                System.out.println("[Main] λ(적격흔적): " + (lambda != null ? lambda : 0.9));
             }
             if (actionsProp != null) {
                 System.out.println("[Main] 행동 수 제한: " + actionsProp + " (긴 점프 " + (actionsProp >= 7 ? "포함" : "제외") + ")");
@@ -92,22 +97,29 @@ public class Main {
     /**
      * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
      *
-     * @param algo    "qlearning" | "sarsa" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
+     * @param algo    "qlearning" | "sarsa" | "sarsa_lambda" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
      * @param seed    시드(null이면 비결정적)
      * @param actions 쓰는 행동 수(null이면 전체)
+     * @param lambda  SARSA(λ) 적격흔적 λ(null이면 두뇌 기본값 0.9)
      * @return 생성된 {@link Brain}
      */
-    private static Brain createBrain(String algo, Long seed, Long actions) {
+    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda) {
         boolean hasSeed = seed != null;
         boolean hasActions = actions != null;
         long s = hasSeed ? seed : 0L;
         int a = hasActions ? actions.intValue() : 0;
+        double lam = (lambda != null) ? lambda : 0.9;
         switch (algo) {
             case "sarsa":
                 if (hasSeed && hasActions) return new SARSA(s, a);
                 if (hasSeed) return new SARSA(s);
                 if (hasActions) return new SARSA(a);
                 return new SARSA();
+            case "sarsa_lambda":
+                if (hasSeed && hasActions) return new SARSALambda(s, a, lam);
+                if (hasSeed) return new SARSALambda(s, lam);
+                if (hasActions) return new SARSALambda(a, lam);
+                return new SARSALambda(lam);
             case "expected_sarsa":
                 if (hasSeed && hasActions) return new ExpectedSARSA(s, a);
                 if (hasSeed) return new ExpectedSARSA(s);
@@ -152,6 +164,20 @@ public class Main {
         }
         try {
             return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            System.err.println("[Main] " + key + " 값이 숫자가 아님(무시): " + value);
+            return null;
+        }
+    }
+
+    /** 시스템 프로퍼티를 {@code Double}로 파싱한다. 없거나 숫자가 아니면 {@code null}. [DAY15] */
+    private static Double parseDoubleProperty(String key) {
+        String value = System.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.trim());
         } catch (NumberFormatException e) {
             System.err.println("[Main] " + key + " 값이 숫자가 아님(무시): " + value);
             return null;

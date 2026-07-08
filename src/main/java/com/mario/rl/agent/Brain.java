@@ -37,6 +37,19 @@ public interface Brain {
     void learn(int common, int local, int action, double reward,
                int nextCommon, int nextLocal, int nextAction, boolean done);
 
+    /**
+     * 에피소드 결과를 알린다 — {@link #endEpisode} 직전에 호출된다. [DAY18]
+     *
+     * <p>{@link #learn}이 받는 건 상태 <i>인덱스</i>와 보상뿐이라 "이번 판에 얼마나 멀리 갔나"를 알 수 없다.
+     * 적합도를 도달 거리로 매기는 진화 두뇌({@link GeneticAlgorithmV2})만 이 값을 쓰고,
+     * 나머지 두뇌는 기본 구현(no-op) 그대로 둔다.</p>
+     *
+     * @param maxX 이번 에피소드에 도달한 최대 x좌표
+     */
+    default void observeEpisodeOutcome(int maxX) {
+        // 기본은 무시 — 보상만으로 학습하는 두뇌(TD·MC·GA·ES·Random)는 이 정보가 필요 없다.
+    }
+
     /** 에피소드가 끝날 때 호출(epsilon 감쇠 등). */
     void endEpisode();
 

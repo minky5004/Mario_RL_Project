@@ -37,9 +37,17 @@ import java.util.Random;
  *   </tr>
  * </table>
  *
- * <p><b>바꾸지 않은 것</b>(DAY13과 동일 — 비교의 축을 흐리지 않기 위해): 모집단 {@value #POPULATION_SIZE} ×
- * 50세대(예산 1500판), 엘리트 {@value #ELITE_COUNT}, 토너먼트 {@value #TOURNAMENT_SIZE}, 균등 교배,
- * 돌연변이(유전자별 {@value #MUTATION_RATE} 확률 · σ={@value #MUTATION_SIGMA}), 초기화 σ={@value #INIT_SIGMA}.</p>
+ * <p><b>바꾸지 않은 것</b>(DAY13과 동일 — 비교의 축을 흐리지 않기 위해): 예산 1500판, 엘리트 {@value #ELITE_COUNT},
+ * 토너먼트 {@value #TOURNAMENT_SIZE}, 균등 교배, 돌연변이(유전자별 {@value #MUTATION_RATE} 확률 ·
+ * σ={@value #MUTATION_SIGMA}), 초기화 σ={@value #INIT_SIGMA}.</p>
+ *
+ * <p><b>[DAY18 트라이2] 적합도 노이즈 제거 — {@code evalsPerGenome}.</b> 트라이1(개체당 1판)에서
+ * <b>깃발을 든 엘리트가 다음 세대에 재현되지 않는</b> 현상이 나왔다(gen19 best=3161 → gen20 best=1425).
+ * 처방ⓐ(softmax)가 확률 정책이라 <b>같은 genome도 매 판 다른 궤적</b>을 내는데 적합도는 <b>단 한 판의 표본</b>이라,
+ * 엘리트·토너먼트가 <i>실력</i>이 아니라 <b>그 판의 운</b>을 뽑고 있었던 것. 트라이2는 같은 개체를
+ * {@code evalsPerGenome}판 굴려 <b>평균</b>을 적합도로 삼는다(노이즈 1/√n). 단 <b>예산이 고정</b>이라
+ * 공짜가 아니다 — {@code 모집단 × 세대 × 평가판수 = 1500}이므로 평가를 3판으로 늘리면 <b>세대가 절반</b>이 된다
+ * (트라이1: 30×50×1 / 트라이2: 20×25×3). <b>적합도 정확도 ↔ 진화 스텝 수</b>의 교환이 이 트라이의 물음이다.</p>
  *
  * <p>{@link Brain}을 직접 구현한다({@link GeneticAlgorithm}·{@link RandomBrain}과 같은 이유 —
  * 모집단은 테이블 여러 벌이라 한 벌만 드는 {@link TabularBrain}과 맞지 않는다).</p>
@@ -51,8 +59,10 @@ public class GeneticAlgorithmV2 implements Brain {
     /** 행동 차원 크기. */
     private static final int ACTION_SIZE = Action.ACTION_SIZE;
 
-    /** 모집단 크기 — 한 세대의 개체 수. 1500판 ÷ 30 = 50세대. [DAY13과 동일] */
-    private static final int POPULATION_SIZE = 30;
+    /** 기본 모집단 크기 — 한 세대의 개체 수. 1500판 ÷ (30 × 1판) = 50세대. [DAY13과 동일 = 트라이1] */
+    private static final int DEFAULT_POPULATION_SIZE = 30;
+    /** 기본 평가 판수 — 개체 하나를 몇 판 굴려 적합도를 매기나. 1 = 한 판(트라이1). [DAY18 트라이2에서 3으로] */
+    private static final int DEFAULT_EVALS_PER_GENOME = 1;
     /** 엘리트 수 — 적합도 상위 이만큼은 다음 세대로 그대로 살린다. [DAY13과 동일] */
     private static final int ELITE_COUNT = 2;
     /** 토너먼트 선택 크기. [DAY13과 동일] */
@@ -77,13 +87,21 @@ public class GeneticAlgorithmV2 implements Brain {
     private final Random random;
     /** 실제로 쓰는 행동 수(≤ {@link #ACTION_SIZE}). 비교는 다른 두뇌와 동일하게 6. */
     private final int activeActions;
+    /** 모집단 크기(한 세대의 개체 수). [DAY18 트라이2] 평가 판수를 늘리면 예산상 이걸 줄여야 한다. */
+    private final int populationSize;
+    /** 개체 하나를 몇 판 굴려 적합도를 매기나. 1=한 판(트라이1) · 3=세 판 평균(트라이2). [DAY18 트라이2] */
+    private final int evalsPerGenome;
 
     /** 현재 세대의 모집단(개체 = genome). */
     private Genome[] population;
     /** 지금 평가 중인 개체의 인덱스. */
     private int currentIndex;
-    /** 이번 판에 도달한 최대 x — {@link #observeEpisodeOutcome}가 채우고 {@link #endEpisode}가 적합도로 확정한다. */
+    /** 이번 판에 도달한 최대 x — {@link #observeEpisodeOutcome}가 채우고 {@link #endEpisode}가 적합도에 반영한다. */
     private int currentMaxX;
+    /** 현재 개체를 지금까지 몇 판 평가했나(0 ~ {@link #evalsPerGenome}-1). [DAY18 트라이2] */
+    private int evalCount;
+    /** 현재 개체의 평가 판들에서 나온 maxX 합(평균 내려고 누적). [DAY18 트라이2] */
+    private double fitnessSum;
     /** 현재 세대 번호(로그용, 1부터). */
     private int generation;
     /** 지금까지 본 최고 적합도(로그용). */
@@ -91,37 +109,58 @@ public class GeneticAlgorithmV2 implements Brain {
 
     /** 시드 없이(비결정적), 전체 행동을 쓰는 기본 생성자. */
     public GeneticAlgorithmV2() {
-        this(new Random(), ACTION_SIZE);
+        this(new Random(), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
     }
 
     /** 시드 고정 생성자(시드 N회 비교용). */
     public GeneticAlgorithmV2(long seed) {
-        this(new Random(seed), ACTION_SIZE);
+        this(new Random(seed), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
     }
 
     /** 시드·행동 수 지정 생성자({@code activeActions=6}이면 긴 점프 OFF). */
     public GeneticAlgorithmV2(long seed, int activeActions) {
-        this(new Random(seed), activeActions);
+        this(new Random(seed), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
     }
 
     /** 시드 없이 행동 수만 지정. */
     public GeneticAlgorithmV2(int activeActions) {
-        this(new Random(), activeActions);
+        this(new Random(), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
     }
 
-    private GeneticAlgorithmV2(Random random, int activeActions) {
+    /**
+     * 모집단·평가 판수까지 지정. [DAY18 트라이2]
+     *
+     * <p>총 예산(1500판)이 고정이므로 {@code 모집단 × 세대 × 평가판수 = 1500}이 되도록 함께 정해야 한다 —
+     * 평가 판수를 늘려 적합도 노이즈를 줄이는 대가는 <b>세대 수 감소</b>다(트라이2: 20 × 25세대 × 3판).</p>
+     */
+    public GeneticAlgorithmV2(long seed, int activeActions, int populationSize, int evalsPerGenome) {
+        this(new Random(seed), activeActions, populationSize, evalsPerGenome);
+    }
+
+    private GeneticAlgorithmV2(Random random, int activeActions, int populationSize, int evalsPerGenome) {
         if (activeActions < 1 || activeActions > ACTION_SIZE) {
             throw new IllegalArgumentException(
                     "activeActions 는 1~" + ACTION_SIZE + " 범위여야 함: " + activeActions);
         }
+        if (populationSize <= ELITE_COUNT) {
+            throw new IllegalArgumentException(
+                    "populationSize 는 엘리트 수(" + ELITE_COUNT + ")보다 커야 함: " + populationSize);
+        }
+        if (evalsPerGenome < 1) {
+            throw new IllegalArgumentException("evalsPerGenome 는 1 이상이어야 함: " + evalsPerGenome);
+        }
         this.random = random;
         this.activeActions = activeActions;
-        this.population = new Genome[POPULATION_SIZE];
-        for (int i = 0; i < POPULATION_SIZE; i++) {
+        this.populationSize = populationSize;
+        this.evalsPerGenome = evalsPerGenome;
+        this.population = new Genome[populationSize];
+        for (int i = 0; i < populationSize; i++) {
             population[i] = randomGenome();
         }
         this.currentIndex = 0;
         this.currentMaxX = 0;
+        this.evalCount = 0;
+        this.fitnessSum = 0.0;
         this.generation = 1;
         this.bestFitnessSoFar = Double.NEGATIVE_INFINITY;
     }
@@ -178,20 +217,36 @@ public class GeneticAlgorithmV2 implements Brain {
     }
 
     /**
-     * 한 개체의 평가가 끝났다 — <b>적합도(=maxX)</b>를 확정하고 다음 개체로 넘긴다.
-     * 모집단을 다 평가했으면 세대 진화를 수행한다.
+     * 한 판이 끝났다 — 도달 거리를 현재 개체의 적합도에 누적한다.
+     *
+     * <p>[DAY18 트라이1]은 {@code evalsPerGenome=1}이라 한 판이 곧 적합도였다. <b>트라이2는 같은 개체를
+     * {@code evalsPerGenome}판 굴려 <u>평균</u>을 적합도로 삼는다</b> — softmax가 확률 정책이라 같은 genome도
+     * 매 판 다른 궤적을 내므로, 한 판 표본은 "실력"이 아니라 "그 판의 운"을 재기 때문이다(트라이1에서
+     * 깃발을 든 엘리트가 다음 세대에 재현되지 않았다). 평균을 내면 노이즈가 1/√n으로 줄어
+     * 엘리트·토너먼트가 <b>운이 아니라 실력</b>을 뽑는다.</p>
+     *
+     * <p>개체를 다 평가했으면 다음 개체로, 모집단을 다 돌았으면 세대 진화를 수행한다.</p>
      */
     @Override
     public void endEpisode() {
-        double fitness = currentMaxX;
+        fitnessSum += currentMaxX;
+        currentMaxX = 0;
+        evalCount++;
+
+        if (evalCount < evalsPerGenome) {
+            return;  // 같은 개체를 한 판 더 굴린다.
+        }
+
+        double fitness = fitnessSum / evalsPerGenome;
         population[currentIndex].fitness = fitness;
         if (fitness > bestFitnessSoFar) {
             bestFitnessSoFar = fitness;
         }
-        currentMaxX = 0;
+        fitnessSum = 0.0;
+        evalCount = 0;
 
         currentIndex++;
-        if (currentIndex >= POPULATION_SIZE) {
+        if (currentIndex >= populationSize) {
             evolve();
             currentIndex = 0;
             generation++;
@@ -205,16 +260,16 @@ public class GeneticAlgorithmV2 implements Brain {
     private void evolve() {
         int bestIdx = 0;
         double sum = 0.0;
-        for (int i = 0; i < POPULATION_SIZE; i++) {
+        for (int i = 0; i < populationSize; i++) {
             sum += population[i].fitness;
             if (population[i].fitness > population[bestIdx].fitness) {
                 bestIdx = i;
             }
         }
-        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX)%n",
-                generation, population[bestIdx].fitness, sum / POPULATION_SIZE);
+        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX avg of %d ep)%n",
+                generation, population[bestIdx].fitness, sum / populationSize, evalsPerGenome);
 
-        Genome[] next = new Genome[POPULATION_SIZE];
+        Genome[] next = new Genome[populationSize];
 
         // 1) 엘리트: 적합도 상위 ELITE_COUNT개를 그대로 보존.
         Integer[] order = sortedByFitnessDesc();
@@ -223,7 +278,7 @@ public class GeneticAlgorithmV2 implements Brain {
         }
 
         // 2) 나머지: 토너먼트로 부모 둘 → 균등 교배 → 돌연변이.
-        for (int i = ELITE_COUNT; i < POPULATION_SIZE; i++) {
+        for (int i = ELITE_COUNT; i < populationSize; i++) {
             Genome child = crossover(tournamentSelect(), tournamentSelect());
             mutate(child);
             next[i] = child;
@@ -234,8 +289,8 @@ public class GeneticAlgorithmV2 implements Brain {
 
     /** 적합도 내림차순으로 정렬한 개체 인덱스 배열(엘리트 추출용). */
     private Integer[] sortedByFitnessDesc() {
-        Integer[] order = new Integer[POPULATION_SIZE];
-        for (int i = 0; i < POPULATION_SIZE; i++) {
+        Integer[] order = new Integer[populationSize];
+        for (int i = 0; i < populationSize; i++) {
             order[i] = i;
         }
         java.util.Arrays.sort(order, (x, y) -> Double.compare(population[y].fitness, population[x].fitness));
@@ -244,9 +299,9 @@ public class GeneticAlgorithmV2 implements Brain {
 
     /** 토너먼트 선택 — 무작위 {@value #TOURNAMENT_SIZE}개 중 적합도 최고 개체. */
     private Genome tournamentSelect() {
-        Genome best = population[random.nextInt(POPULATION_SIZE)];
+        Genome best = population[random.nextInt(populationSize)];
         for (int t = 1; t < TOURNAMENT_SIZE; t++) {
-            Genome challenger = population[random.nextInt(POPULATION_SIZE)];
+            Genome challenger = population[random.nextInt(populationSize)];
             if (challenger.fitness > best.fitness) {
                 best = challenger;
             }

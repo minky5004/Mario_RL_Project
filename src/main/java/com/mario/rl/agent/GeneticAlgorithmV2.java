@@ -49,6 +49,13 @@ import java.util.Random;
  * 공짜가 아니다 — {@code 모집단 × 세대 × 평가판수 = 1500}이므로 평가를 3판으로 늘리면 <b>세대가 절반</b>이 된다
  * (트라이1: 30×50×1 / 트라이2: 20×25×3). <b>적합도 정확도 ↔ 진화 스텝 수</b>의 교환이 이 트라이의 물음이다.</p>
  *
+ * <p><b>[DAY19] 대박의 꼬리를 살린다 — {@link FitnessAggregation#MAX}.</b> 트라이2(3판 <b>평균</b>)는 노이즈는
+ * 지웠지만 <b>깃발이 4회→1회로 줄었다</b>. 깃발은 "평균적으로 훌륭한" 정책이 아니라 <b>"가끔 크게 터지는"</b>
+ * 정책이 내는데 평균이 그 꼬리를 눌러버렸기 때문. [DAY19]는 같은 예산 분할(20×25×3)을 그대로 두고 <b>집계만
+ * 평균→최고(max)로</b> 바꾼다 — K판 중 최고 기록을 적합도로 삼아 대박 잠재력을 살린다. 트라이2와 세대 수(25)가
+ * 같으므로 차이는 <b>오직 집계 방식</b>이라, 트라이2의 후퇴가 "평균화" 탓인지 "세대 감소" 탓인지도 함께 갈린다
+ * ({@code -Dmario.ga.agg=max}).</p>
+ *
  * <p>{@link Brain}을 직접 구현한다({@link GeneticAlgorithm}·{@link RandomBrain}과 같은 이유 —
  * 모집단은 테이블 여러 벌이라 한 벌만 드는 {@link TabularBrain}과 맞지 않는다).</p>
  */
@@ -63,6 +70,8 @@ public class GeneticAlgorithmV2 implements Brain {
     private static final int DEFAULT_POPULATION_SIZE = 30;
     /** 기본 평가 판수 — 개체 하나를 몇 판 굴려 적합도를 매기나. 1 = 한 판(트라이1). [DAY18 트라이2에서 3으로] */
     private static final int DEFAULT_EVALS_PER_GENOME = 1;
+    /** 기본 적합도 집계 — 여러 판을 무엇으로 요약하나. 평균(트라이2 기본). [DAY19에서 MAX로] */
+    private static final FitnessAggregation DEFAULT_AGGREGATION = FitnessAggregation.MEAN;
     /** 엘리트 수 — 적합도 상위 이만큼은 다음 세대로 그대로 살린다. [DAY13과 동일] */
     private static final int ELITE_COUNT = 2;
     /** 토너먼트 선택 크기. [DAY13과 동일] */
@@ -89,8 +98,10 @@ public class GeneticAlgorithmV2 implements Brain {
     private final int activeActions;
     /** 모집단 크기(한 세대의 개체 수). [DAY18 트라이2] 평가 판수를 늘리면 예산상 이걸 줄여야 한다. */
     private final int populationSize;
-    /** 개체 하나를 몇 판 굴려 적합도를 매기나. 1=한 판(트라이1) · 3=세 판 평균(트라이2). [DAY18 트라이2] */
+    /** 개체 하나를 몇 판 굴려 적합도를 매기나. 1=한 판(트라이1) · 3=세 판(트라이2·DAY19). [DAY18 트라이2] */
     private final int evalsPerGenome;
+    /** 여러 판을 무엇으로 요약하나 — MEAN(트라이2) · MAX(DAY19). [DAY19] */
+    private final FitnessAggregation aggregation;
 
     /** 현재 세대의 모집단(개체 = genome). */
     private Genome[] population;
@@ -100,8 +111,10 @@ public class GeneticAlgorithmV2 implements Brain {
     private int currentMaxX;
     /** 현재 개체를 지금까지 몇 판 평가했나(0 ~ {@link #evalsPerGenome}-1). [DAY18 트라이2] */
     private int evalCount;
-    /** 현재 개체의 평가 판들에서 나온 maxX 합(평균 내려고 누적). [DAY18 트라이2] */
+    /** 현재 개체의 평가 판들에서 나온 maxX 합(MEAN 집계용 누적). [DAY18 트라이2] */
     private double fitnessSum;
+    /** 현재 개체의 평가 판들에서 나온 maxX 최댓값(MAX 집계용). [DAY19] */
+    private double fitnessBest;
     /** 현재 세대 번호(로그용, 1부터). */
     private int generation;
     /** 지금까지 본 최고 적합도(로그용). */
@@ -109,35 +122,39 @@ public class GeneticAlgorithmV2 implements Brain {
 
     /** 시드 없이(비결정적), 전체 행동을 쓰는 기본 생성자. */
     public GeneticAlgorithmV2() {
-        this(new Random(), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
+        this(new Random(), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
     }
 
     /** 시드 고정 생성자(시드 N회 비교용). */
     public GeneticAlgorithmV2(long seed) {
-        this(new Random(seed), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
+        this(new Random(seed), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
     }
 
     /** 시드·행동 수 지정 생성자({@code activeActions=6}이면 긴 점프 OFF). */
     public GeneticAlgorithmV2(long seed, int activeActions) {
-        this(new Random(seed), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
+        this(new Random(seed), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
     }
 
     /** 시드 없이 행동 수만 지정. */
     public GeneticAlgorithmV2(int activeActions) {
-        this(new Random(), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME);
+        this(new Random(), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
     }
 
     /**
-     * 모집단·평가 판수까지 지정. [DAY18 트라이2]
+     * 모집단·평가 판수·집계 방식까지 지정. [DAY18 트라이2 · DAY19]
      *
      * <p>총 예산(1500판)이 고정이므로 {@code 모집단 × 세대 × 평가판수 = 1500}이 되도록 함께 정해야 한다 —
-     * 평가 판수를 늘려 적합도 노이즈를 줄이는 대가는 <b>세대 수 감소</b>다(트라이2: 20 × 25세대 × 3판).</p>
+     * 평가 판수를 늘려 적합도 노이즈를 줄이는 대가는 <b>세대 수 감소</b>다(트라이2·DAY19: 20 × 25세대 × 3판).
+     * {@code aggregation}은 그 여러 판을 <b>무엇으로 요약할지</b>다({@link FitnessAggregation#MEAN 평균}=트라이2 ·
+     * {@link FitnessAggregation#MAX 최고}=DAY19).</p>
      */
-    public GeneticAlgorithmV2(long seed, int activeActions, int populationSize, int evalsPerGenome) {
-        this(new Random(seed), activeActions, populationSize, evalsPerGenome);
+    public GeneticAlgorithmV2(long seed, int activeActions, int populationSize, int evalsPerGenome,
+                              FitnessAggregation aggregation) {
+        this(new Random(seed), activeActions, populationSize, evalsPerGenome, aggregation);
     }
 
-    private GeneticAlgorithmV2(Random random, int activeActions, int populationSize, int evalsPerGenome) {
+    private GeneticAlgorithmV2(Random random, int activeActions, int populationSize, int evalsPerGenome,
+                              FitnessAggregation aggregation) {
         if (activeActions < 1 || activeActions > ACTION_SIZE) {
             throw new IllegalArgumentException(
                     "activeActions 는 1~" + ACTION_SIZE + " 범위여야 함: " + activeActions);
@@ -153,6 +170,7 @@ public class GeneticAlgorithmV2 implements Brain {
         this.activeActions = activeActions;
         this.populationSize = populationSize;
         this.evalsPerGenome = evalsPerGenome;
+        this.aggregation = (aggregation != null) ? aggregation : DEFAULT_AGGREGATION;
         this.population = new Genome[populationSize];
         for (int i = 0; i < populationSize; i++) {
             population[i] = randomGenome();
@@ -161,6 +179,7 @@ public class GeneticAlgorithmV2 implements Brain {
         this.currentMaxX = 0;
         this.evalCount = 0;
         this.fitnessSum = 0.0;
+        this.fitnessBest = Double.NEGATIVE_INFINITY;
         this.generation = 1;
         this.bestFitnessSoFar = Double.NEGATIVE_INFINITY;
     }
@@ -219,17 +238,26 @@ public class GeneticAlgorithmV2 implements Brain {
     /**
      * 한 판이 끝났다 — 도달 거리를 현재 개체의 적합도에 누적한다.
      *
-     * <p>[DAY18 트라이1]은 {@code evalsPerGenome=1}이라 한 판이 곧 적합도였다. <b>트라이2는 같은 개체를
-     * {@code evalsPerGenome}판 굴려 <u>평균</u>을 적합도로 삼는다</b> — softmax가 확률 정책이라 같은 genome도
+     * <p>[DAY18 트라이1]은 {@code evalsPerGenome=1}이라 한 판이 곧 적합도였다. 트라이2·[DAY19]는 같은 개체를
+     * {@code evalsPerGenome}판 굴려 <b>{@link #aggregation}</b>대로 요약한다 — softmax가 확률 정책이라 같은 genome도
      * 매 판 다른 궤적을 내므로, 한 판 표본은 "실력"이 아니라 "그 판의 운"을 재기 때문이다(트라이1에서
-     * 깃발을 든 엘리트가 다음 세대에 재현되지 않았다). 평균을 내면 노이즈가 1/√n으로 줄어
-     * 엘리트·토너먼트가 <b>운이 아니라 실력</b>을 뽑는다.</p>
+     * 깃발을 든 엘리트가 다음 세대에 재현되지 않았다).</p>
+     *
+     * <ul>
+     *   <li>{@link FitnessAggregation#MEAN 평균}(트라이2): 노이즈가 1/√n로 줄지만, <b>대박(깃발)의 꼬리를 눌러</b>
+     *       진화가 안전·평범한 정책으로 수렴했다(clear 4회→1회).</li>
+     *   <li>{@link FitnessAggregation#MAX 최고}([DAY19]): K판 중 최고 기록을 적합도로 — <b>"가끔 크게 터지는" 잠재력</b>을
+     *       살린다. 트라이2 교훈("평균이 대박을 벌한다")의 직접 처방.</li>
+     * </ul>
      *
      * <p>개체를 다 평가했으면 다음 개체로, 모집단을 다 돌았으면 세대 진화를 수행한다.</p>
      */
     @Override
     public void endEpisode() {
         fitnessSum += currentMaxX;
+        if (currentMaxX > fitnessBest) {
+            fitnessBest = currentMaxX;
+        }
         currentMaxX = 0;
         evalCount++;
 
@@ -237,12 +265,17 @@ public class GeneticAlgorithmV2 implements Brain {
             return;  // 같은 개체를 한 판 더 굴린다.
         }
 
-        double fitness = fitnessSum / evalsPerGenome;
+        // [DAY19] 여러 판을 집계 방식대로 요약 — MEAN(평균, 트라이2) vs MAX(최고, 대박 꼬리 보존).
+        //   evalsPerGenome=1이면 둘이 같은 값(단일 표본)이라 트라이1과 완전히 동일하다(회귀 안전).
+        double fitness = (aggregation == FitnessAggregation.MAX)
+                ? fitnessBest
+                : fitnessSum / evalsPerGenome;
         population[currentIndex].fitness = fitness;
         if (fitness > bestFitnessSoFar) {
             bestFitnessSoFar = fitness;
         }
         fitnessSum = 0.0;
+        fitnessBest = Double.NEGATIVE_INFINITY;
         evalCount = 0;
 
         currentIndex++;
@@ -266,8 +299,9 @@ public class GeneticAlgorithmV2 implements Brain {
                 bestIdx = i;
             }
         }
-        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX avg of %d ep)%n",
-                generation, population[bestIdx].fitness, sum / populationSize, evalsPerGenome);
+        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX %s of %d ep)%n",
+                generation, population[bestIdx].fitness, sum / populationSize,
+                aggregation == FitnessAggregation.MAX ? "max" : "avg", evalsPerGenome);
 
         Genome[] next = new Genome[populationSize];
 
@@ -346,6 +380,34 @@ public class GeneticAlgorithmV2 implements Brain {
     @Override
     public double getEpsilon() {
         return 0.0;
+    }
+
+    /**
+     * 여러 판 평가 결과를 <b>한 적합도로 요약하는 방식</b>. [DAY19]
+     *
+     * <p>[DAY18 트라이2]가 <b>평균</b>({@link #MEAN})을 쓴 결과 노이즈는 지워졌지만 <b>깃발이 4회→1회로 줄었다</b> —
+     * 깃발은 "평균적으로 훌륭한" 정책이 아니라 <b>"가끔 크게 터지는"</b> 정책이 내는데, 평균이 그 대박의 꼬리를
+     * 눌러 진화가 안전·평범한 정책으로 수렴했기 때문. {@link #MAX}는 그 교훈의 직접 처방이다 — 개체의 적합도를
+     * K판 중 <b>최고 기록</b>으로 삼아 "가끔 크게 터지는 잠재력"을 살린다(꼬리는 살리되, 여러 판을 줘 한 번은
+     * 잠재력을 보이게 함).</p>
+     */
+    public enum FitnessAggregation {
+        /** K판의 평균(트라이2). 노이즈는 줄지만 대박 꼬리를 누른다. */
+        MEAN,
+        /** K판 중 최고 기록(DAY19). 대박 꼬리를 살린다. */
+        MAX;
+
+        /** 문자열 → 모드(대소문자 무시). {@code "mean"}·{@code "max"} 외에는 {@code null}. */
+        public static FitnessAggregation fromString(String s) {
+            if (s == null) {
+                return null;
+            }
+            switch (s.trim().toLowerCase()) {
+                case "mean": case "avg": case "average": return MEAN;
+                case "max": case "best": return MAX;
+                default: return null;
+            }
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.mario.rl;
 
 import com.mario.rl.agent.Brain;
+import com.mario.rl.agent.DoubleQLearning;
 import com.mario.rl.agent.EvolutionStrategy;
 import com.mario.rl.agent.ExpectedSARSA;
 import com.mario.rl.agent.GeneticAlgorithm;
@@ -44,7 +45,7 @@ public class Main {
         System.out.println("=== Mario RL (Q-Learning) 학습 시작 ===");
 
         // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
-        //   -Dmario.algo=qlearning|sarsa|expected_sarsa|monte_carlo|random|ga|es : 알고리즘 선택 [DAY10~14] (random=무학습 기준선, ga=유전 알고리즘, es=진화 전략)
+        //   -Dmario.algo=qlearning|double_qlearning|sarsa|sarsa_lambda|expected_sarsa|monte_carlo|random|ga|es : 알고리즘 선택 [DAY10~16] (double_qlearning=최대화 편향 제거, random=무학습 기준선, ga=유전 알고리즘, es=진화 전략)
         //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
         //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
         //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
@@ -97,7 +98,7 @@ public class Main {
     /**
      * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
      *
-     * @param algo    "qlearning" | "sarsa" | "sarsa_lambda" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
+     * @param algo    "qlearning" | "double_qlearning" | "sarsa" | "sarsa_lambda" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
      * @param seed    시드(null이면 비결정적)
      * @param actions 쓰는 행동 수(null이면 전체)
      * @param lambda  SARSA(λ) 적격흔적 λ(null이면 두뇌 기본값 0.9)
@@ -110,6 +111,12 @@ public class Main {
         int a = hasActions ? actions.intValue() : 0;
         double lam = (lambda != null) ? lambda : 0.9;
         switch (algo) {
+            case "double_qlearning":
+            case "double_q":
+                if (hasSeed && hasActions) return new DoubleQLearning(s, a);
+                if (hasSeed) return new DoubleQLearning(s);
+                if (hasActions) return new DoubleQLearning(a);
+                return new DoubleQLearning();
             case "sarsa":
                 if (hasSeed && hasActions) return new SARSA(s, a);
                 if (hasSeed) return new SARSA(s);

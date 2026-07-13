@@ -6,6 +6,7 @@ import com.mario.rl.agent.EvolutionStrategy;
 import com.mario.rl.agent.ExpectedSARSA;
 import com.mario.rl.agent.GeneticAlgorithm;
 import com.mario.rl.agent.MonteCarlo;
+import com.mario.rl.agent.NStepSARSA;
 import com.mario.rl.agent.QLearning;
 import com.mario.rl.agent.RLAgent;
 import com.mario.rl.agent.RandomBrain;
@@ -45,7 +46,7 @@ public class Main {
         System.out.println("=== Mario RL (Q-Learning) 학습 시작 ===");
 
         // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
-        //   -Dmario.algo=qlearning|double_qlearning|sarsa|sarsa_lambda|expected_sarsa|monte_carlo|random|ga|es : 알고리즘 선택 [DAY10~16] (double_qlearning=최대화 편향 제거, random=무학습 기준선, ga=유전 알고리즘, es=진화 전략)
+        //   -Dmario.algo=qlearning|double_qlearning|sarsa|sarsa_lambda|nstep_sarsa|expected_sarsa|monte_carlo|random|ga|es : 알고리즘 선택 [DAY10~17] (double_qlearning=최대화 편향 제거, nstep_sarsa=MC와 TD를 잇는 n-step, random=무학습 기준선, ga=유전 알고리즘, es=진화 전략)
         //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
         //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
         //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
@@ -53,6 +54,7 @@ public class Main {
         String algo = System.getProperty("mario.algo", "qlearning").trim().toLowerCase();
         Long seed = parseLongProperty("mario.seed");
         Double lambda = parseDoubleProperty("mario.lambda");  // [DAY15] SARSA(λ) 적격흔적 λ (미지정=0.9)
+        Long nstep = parseLongProperty("mario.nstep");        // [DAY17] n-step SARSA의 n (미지정=8)
         String loadPath = System.getProperty("mario.load");
         String savePath = System.getProperty("mario.save");
         Long portProp = parseLongProperty("mario.port");
@@ -60,13 +62,16 @@ public class Main {
         Long actionsProp = parseLongProperty("mario.actions");
 
         try (SocketClient socketClient = new SocketClient(HOST, port)) {
-            Brain brain = createBrain(algo, seed, actionsProp, lambda);
+            Brain brain = createBrain(algo, seed, actionsProp, lambda, nstep);
             System.out.println("[Main] 알고리즘: " + algo);
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
             }
             if (algo.equals("sarsa_lambda")) {
                 System.out.println("[Main] λ(적격흔적): " + (lambda != null ? lambda : 0.9));
+            }
+            if (algo.equals("nstep_sarsa")) {
+                System.out.println("[Main] n(부트스트랩까지 쌓는 실제 보상 칸 수): " + (nstep != null ? nstep : 8));
             }
             if (actionsProp != null) {
                 System.out.println("[Main] 행동 수 제한: " + actionsProp + " (긴 점프 " + (actionsProp >= 7 ? "포함" : "제외") + ")");
@@ -98,18 +103,20 @@ public class Main {
     /**
      * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
      *
-     * @param algo    "qlearning" | "double_qlearning" | "sarsa" | "sarsa_lambda" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
+     * @param algo    "qlearning" | "double_qlearning" | "sarsa" | "sarsa_lambda" | "nstep_sarsa" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "es" (그 외는 qlearning 으로 폴백)
      * @param seed    시드(null이면 비결정적)
      * @param actions 쓰는 행동 수(null이면 전체)
      * @param lambda  SARSA(λ) 적격흔적 λ(null이면 두뇌 기본값 0.9)
+     * @param nstep   n-step SARSA의 n(null이면 두뇌 기본값 8)
      * @return 생성된 {@link Brain}
      */
-    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda) {
+    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep) {
         boolean hasSeed = seed != null;
         boolean hasActions = actions != null;
         long s = hasSeed ? seed : 0L;
         int a = hasActions ? actions.intValue() : 0;
         double lam = (lambda != null) ? lambda : 0.9;
+        int n = (nstep != null) ? nstep.intValue() : 8;
         switch (algo) {
             case "double_qlearning":
             case "double_q":
@@ -127,6 +134,12 @@ public class Main {
                 if (hasSeed) return new SARSALambda(s, lam);
                 if (hasActions) return new SARSALambda(a, lam);
                 return new SARSALambda(lam);
+            case "nstep_sarsa":
+            case "n_step_sarsa":
+                if (hasSeed && hasActions) return new NStepSARSA(s, a, n);
+                if (hasSeed) return new NStepSARSA(s, n);
+                if (hasActions) return new NStepSARSA(a, n);
+                return new NStepSARSA(n);
             case "expected_sarsa":
                 if (hasSeed && hasActions) return new ExpectedSARSA(s, a);
                 if (hasSeed) return new ExpectedSARSA(s);

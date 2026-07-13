@@ -24,7 +24,10 @@
 |---|---|---|:---:|
 | **Q-Learning** | 매 스텝, 다음 상태에서 *가장 좋은* 행동을 가정(`max`)해 Q값을 갱신 | **off-policy** — 탐험과 무관하게 최적 정책을 학습, 공격적 | ✅ |
 | **SARSA** | 다음 상태에서 *실제로 고른* 행동의 Q값으로 갱신 | **on-policy** — 탐험의 위험을 학습에 반영해 더 보수적·안전 | ✅ |
+| **SARSA(λ)** 🥇 | SARSA + **적격흔적** — 최근 밟은 상태들에 "책임 꼬리표"를 남겨 한 번의 오차를 과거로 한꺼번에 전파 | **비교군 최상위.** 실측: clear 12배·첫 깃발 3.8배 일찍(5/5 전 시드)·timeout 최저(17). sparse-reward의 진짜 병목(신용 전파)을 정면으로 품 | ✅ |
+| **n-step SARSA** 🥈 | 실제 보상을 **n칸(8)** 쌓은 뒤 그 지점부터 추정치로 부트스트랩 (n=1이면 SARSA, n=∞면 Monte Carlo) | **MC와 TD를 잇는 다리.** 실측: MC에 부트스트랩을 되돌리자 timeout 580→59·clear 5→206으로 부활해 2위 | ✅ |
 | **Expected SARSA** | 다음 행동들의 *기대값*(정책 확률로 가중 평균 `(1-ε)·max + ε·mean`)으로 갱신 | 분산을 줄여 더 안정적 — 실측: SARSA의 timeout 성향을 Q-Learning 쪽으로 완화 | ✅ |
+| **Double Q-Learning** | 테이블 2벌로 "**고르기**(argmax)"와 "**값 읽기**"를 분리해 최대화 편향(과대추정) 제거 | 실측: **이 환경에선 오히려 후퇴**(clear 36→1) — sparse-reward 1-1에선 QL의 낙관이 되레 드문 깃발 경로로 미는 힘이었다 | ✅ |
 | **Monte Carlo** | 한 *에피소드가 끝난 뒤* 실제 받은 보상 총합으로 갱신(부트스트랩 없음) | 편향은 없지만 분산이 크고 느림 — 실측: 본선에서 TD에 *처음으로 밀림*, timeout이 Random급(끝을 못 냄). 깃발엔 닿음 | ✅ |
 | **랜덤** | 학습 없이 무작위 행동 | 다른 알고리즘을 견주는 **바닥 기준선** (깃발 0·거리 절반) | ✅ |
 | **GA (유전 알고리즘)** | 정책 *모집단*을 굴려 적합도(한 판 보상 합) 측정 → 상위 선택·교배·돌연변이로 다음 세대(Q값·그래디언트 없음) | 그래디언트·Q값이 필요 없는 **블랙박스** — 실측: 이 설정(8천 파라미터·30×50세대)에선 *바닥선(Random)보다도 못함*(깃발 0·timeout 2배). 진화 자체가 아니라 큰 파라미터·빈약한 예산·신용할당 부재의 합작 | ✅ |
@@ -77,14 +80,16 @@ docker run --rm -p 9999:9999 -p 8081:8081 mario-env   # 8081 = 브라우저 화�
 
 | 옵션 | 뜻 | 기본 |
 |---|---|---|
-| `-Dmario.algo=qlearning\|sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|es` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘, es=진화 전략) | `qlearning` |
+| `-Dmario.algo=qlearning\|double_q\|sarsa\|sarsa_lambda\|nstep_sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|es` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘, es=진화 전략) | `qlearning` |
+| `-Dmario.lambda=0.9` | SARSA(λ)의 적격흔적 감쇠 λ | 0.9 |
+| `-Dmario.nstep=8` | n-step SARSA의 n(실제 보상을 몇 칸 쌓고 부트스트랩할지) | 8 |
 | `-Dmario.seed=N` | 난수 시드 고정(재현·시드 비교) | 없음 |
 | `-Dmario.port=N` | 서버 포트(병렬 실행용) | 9999 |
 | `-Dmario.actions=6` | 쓰는 행동 수(6 = 긴 점프 끔) | 7 |
 | `-Dmario.load/save=경로` | Q-Table 이어학습·저장 | 없음 |
 
 ```bash
-./gradlew run -Dmario.algo=sarsa -Dmario.seed=1   # SARSA, 시드 1
+./gradlew run -Dmario.algo=sarsa_lambda -Dmario.seed=1   # SARSA(λ), 시드 1 (현재 최강)
 ```
 
 <br>
@@ -99,7 +104,10 @@ Mario_RL_Project/
 │   │   ├── Brain.java           #   두뇌 공통 인터페이스
 │   │   ├── TabularBrain.java    #   표 기반 공통 베이스(두 테이블·ε·저장/로드)
 │   │   ├── QLearning.java       #   off-policy TD (bootstrap=max)
+│   │   ├── DoubleQLearning.java #   최대화 편향 제거(테이블 2벌: 고르기/읽기 분리)
 │   │   ├── SARSA.java           #   on-policy TD (bootstrap=실제 다음 행동)
+│   │   ├── SARSALambda.java     #   SARSA + 적격흔적(신용을 흔적만큼 과거로 전파)
+│   │   ├── NStepSARSA.java      #   실제 보상 n칸 + 부트스트랩(MC↔TD를 잇는 다리)
 │   │   ├── ExpectedSARSA.java   #   on-policy TD (bootstrap=정책 기댓값)
 │   │   ├── MonteCarlo.java      #   부트스트랩 없음(에피소드 끝 return G로 갱신)
 │   │   ├── GeneticAlgorithm.java#   진화 GA(모집단·적합도·교배·돌연변이, Q값 없음)

@@ -109,7 +109,9 @@ public class RLAgent {
             }
         }
 
-        // 에피소드 종료: 탐험 비율 감소 후 요약 로그
+        // 에피소드 종료: 결과(도달 거리) 통보 → 탐험 비율 감소 → 요약 로그
+        // [DAY18] maxX는 여기(루프)에만 있으므로 두뇌에 따로 알린다. 쓰는 두뇌는 GA v2뿐(적합도=maxX).
+        brain.observeEpisodeOutcome(maxX);
         brain.endEpisode();
         logger.logEpisode(episode, totalReward, maxX, brain.getEpsilon());
     }

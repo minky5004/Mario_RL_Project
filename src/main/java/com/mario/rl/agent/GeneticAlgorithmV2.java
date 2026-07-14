@@ -56,6 +56,13 @@ import java.util.Random;
  * 같으므로 차이는 <b>오직 집계 방식</b>이라, 트라이2의 후퇴가 "평균화" 탓인지 "세대 감소" 탓인지도 함께 갈린다
  * ({@code -Dmario.ga.agg=max}).</p>
  *
+ * <p><b>[DAY19 트라이2] 명예의 전당 — {@link #hallOfFame}.</b> [DAY18]이 남긴 실패 하나를 직접 고친다:
+ * <i>깃발을 든 개체를 엘리트로 보존했는데도 다음 세대에 재현되지 않았다</i>(softmax가 확률 정책이라 같은 genome도
+ * 매 판 다른 궤적 → 깃발을 밟은 개체가 다음 세대엔 낮은 점수를 받아 모집단에서 사라진다). 명예의 전당은
+ * <b>역대 최고 적합도를 낸 개체({@link #champion})를 박제해 매 세대 강제로 재주입</b>한다 — 그 유전자가 절대
+ * 유실되지 않고 매 세대 다시 골인을 시도한다. GA 최고 구성([DAY18] pop30×50세대×1판, clear 0.8)에 이것
+ * <b>하나만</b> 더한 단일 변수 실험이다({@code -Dmario.ga.hof=true}, 예산 1500 유지).</p>
+ *
  * <p>{@link Brain}을 직접 구현한다({@link GeneticAlgorithm}·{@link RandomBrain}과 같은 이유 —
  * 모집단은 테이블 여러 벌이라 한 벌만 드는 {@link TabularBrain}과 맞지 않는다).</p>
  */
@@ -72,6 +79,8 @@ public class GeneticAlgorithmV2 implements Brain {
     private static final int DEFAULT_EVALS_PER_GENOME = 1;
     /** 기본 적합도 집계 — 여러 판을 무엇으로 요약하나. 평균(트라이2 기본). [DAY19에서 MAX로] */
     private static final FitnessAggregation DEFAULT_AGGREGATION = FitnessAggregation.MEAN;
+    /** 기본 명예의 전당 사용 여부 — 끔([DAY18]·[DAY19 트라이1] 동작 유지). [DAY19 트라이2에서 켬] */
+    private static final boolean DEFAULT_HALL_OF_FAME = false;
     /** 엘리트 수 — 적합도 상위 이만큼은 다음 세대로 그대로 살린다. [DAY13과 동일] */
     private static final int ELITE_COUNT = 2;
     /** 토너먼트 선택 크기. [DAY13과 동일] */
@@ -102,6 +111,8 @@ public class GeneticAlgorithmV2 implements Brain {
     private final int evalsPerGenome;
     /** 여러 판을 무엇으로 요약하나 — MEAN(트라이2) · MAX(DAY19). [DAY19] */
     private final FitnessAggregation aggregation;
+    /** 명예의 전당 — 켜면 역대 최고 개체를 매 세대 모집단에 강제로 재주입한다. [DAY19 트라이2] */
+    private final boolean hallOfFame;
 
     /** 현재 세대의 모집단(개체 = genome). */
     private Genome[] population;
@@ -119,25 +130,27 @@ public class GeneticAlgorithmV2 implements Brain {
     private int generation;
     /** 지금까지 본 최고 적합도(로그용). */
     private double bestFitnessSoFar;
+    /** 역대 최고 개체(명예의 전당) — 최고 적합도를 낸 genome의 깊은 복사. hallOfFame이 켜졌을 때만 채운다. [DAY19 트라이2] */
+    private Genome champion;
 
     /** 시드 없이(비결정적), 전체 행동을 쓰는 기본 생성자. */
     public GeneticAlgorithmV2() {
-        this(new Random(), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
+        this(new Random(), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION, DEFAULT_HALL_OF_FAME);
     }
 
     /** 시드 고정 생성자(시드 N회 비교용). */
     public GeneticAlgorithmV2(long seed) {
-        this(new Random(seed), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
+        this(new Random(seed), ACTION_SIZE, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION, DEFAULT_HALL_OF_FAME);
     }
 
     /** 시드·행동 수 지정 생성자({@code activeActions=6}이면 긴 점프 OFF). */
     public GeneticAlgorithmV2(long seed, int activeActions) {
-        this(new Random(seed), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
+        this(new Random(seed), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION, DEFAULT_HALL_OF_FAME);
     }
 
     /** 시드 없이 행동 수만 지정. */
     public GeneticAlgorithmV2(int activeActions) {
-        this(new Random(), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION);
+        this(new Random(), activeActions, DEFAULT_POPULATION_SIZE, DEFAULT_EVALS_PER_GENOME, DEFAULT_AGGREGATION, DEFAULT_HALL_OF_FAME);
     }
 
     /**
@@ -146,15 +159,15 @@ public class GeneticAlgorithmV2 implements Brain {
      * <p>총 예산(1500판)이 고정이므로 {@code 모집단 × 세대 × 평가판수 = 1500}이 되도록 함께 정해야 한다 —
      * 평가 판수를 늘려 적합도 노이즈를 줄이는 대가는 <b>세대 수 감소</b>다(트라이2·DAY19: 20 × 25세대 × 3판).
      * {@code aggregation}은 그 여러 판을 <b>무엇으로 요약할지</b>다({@link FitnessAggregation#MEAN 평균}=트라이2 ·
-     * {@link FitnessAggregation#MAX 최고}=DAY19).</p>
+     * {@link FitnessAggregation#MAX 최고}=DAY19). {@code hallOfFame}은 역대 최고 개체를 매 세대 강제 재주입할지다([DAY19 트라이2]).</p>
      */
     public GeneticAlgorithmV2(long seed, int activeActions, int populationSize, int evalsPerGenome,
-                              FitnessAggregation aggregation) {
-        this(new Random(seed), activeActions, populationSize, evalsPerGenome, aggregation);
+                              FitnessAggregation aggregation, boolean hallOfFame) {
+        this(new Random(seed), activeActions, populationSize, evalsPerGenome, aggregation, hallOfFame);
     }
 
     private GeneticAlgorithmV2(Random random, int activeActions, int populationSize, int evalsPerGenome,
-                              FitnessAggregation aggregation) {
+                              FitnessAggregation aggregation, boolean hallOfFame) {
         if (activeActions < 1 || activeActions > ACTION_SIZE) {
             throw new IllegalArgumentException(
                     "activeActions 는 1~" + ACTION_SIZE + " 범위여야 함: " + activeActions);
@@ -171,6 +184,7 @@ public class GeneticAlgorithmV2 implements Brain {
         this.populationSize = populationSize;
         this.evalsPerGenome = evalsPerGenome;
         this.aggregation = (aggregation != null) ? aggregation : DEFAULT_AGGREGATION;
+        this.hallOfFame = hallOfFame;
         this.population = new Genome[populationSize];
         for (int i = 0; i < populationSize; i++) {
             population[i] = randomGenome();
@@ -182,6 +196,7 @@ public class GeneticAlgorithmV2 implements Brain {
         this.fitnessBest = Double.NEGATIVE_INFINITY;
         this.generation = 1;
         this.bestFitnessSoFar = Double.NEGATIVE_INFINITY;
+        this.champion = null;
     }
 
     /**
@@ -273,6 +288,9 @@ public class GeneticAlgorithmV2 implements Brain {
         population[currentIndex].fitness = fitness;
         if (fitness > bestFitnessSoFar) {
             bestFitnessSoFar = fitness;
+            if (hallOfFame) {
+                champion = population[currentIndex].copy();  // 역대 최고 개체를 박제한다. [DAY19 트라이2]
+            }
         }
         fitnessSum = 0.0;
         fitnessBest = Double.NEGATIVE_INFINITY;
@@ -299,9 +317,10 @@ public class GeneticAlgorithmV2 implements Brain {
                 bestIdx = i;
             }
         }
-        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX %s of %d ep)%n",
+        System.out.printf("[GAv2] gen=%d best=%.0f mean=%.0f (fitness=maxX %s of %d ep%s)%n",
                 generation, population[bestIdx].fitness, sum / populationSize,
-                aggregation == FitnessAggregation.MAX ? "max" : "avg", evalsPerGenome);
+                aggregation == FitnessAggregation.MAX ? "max" : "avg", evalsPerGenome,
+                hallOfFame ? ", HoF" : "");
 
         Genome[] next = new Genome[populationSize];
 
@@ -316,6 +335,13 @@ public class GeneticAlgorithmV2 implements Brain {
             Genome child = crossover(tournamentSelect(), tournamentSelect());
             mutate(child);
             next[i] = child;
+        }
+
+        // 3) 명예의 전당: 역대 최고 개체를 매 세대 강제 재주입한다. [DAY19 트라이2]
+        //    [DAY18] 관찰 — softmax는 확률 정책이라, 깃발을 든 개체도 다음 세대엔 낮은 점수를 받아 모집단에서 사라졌다.
+        //    champion을 항상 한 슬롯에 넣어 두면 그 유전자가 절대 유실되지 않고, 매 세대 다시 골인을 시도한다.
+        if (hallOfFame && champion != null) {
+            next[populationSize - 1] = champion.copy();
         }
 
         population = next;

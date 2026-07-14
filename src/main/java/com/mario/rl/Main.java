@@ -49,7 +49,7 @@ public class Main {
 
         // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
         //   -Dmario.algo=qlearning|double_qlearning|sarsa|sarsa_lambda|nstep_sarsa|expected_sarsa|monte_carlo|random|ga|ga_v2|es : 알고리즘 선택 [DAY10~18] (double_qlearning=최대화 편향 제거, nstep_sarsa=MC와 TD를 잇는 n-step, random=무학습 기준선, ga=유전 알고리즘, ga_v2=GA 개편판(softmax·공통테이블만·적합도 maxX), es=진화 전략)
-        //   -Dmario.ga.pop=N -Dmario.ga.evals=N -Dmario.ga.agg=mean|max : GA v2 모집단·개체당 평가판수·적합도 집계 [DAY18 트라이2·DAY19]
+        //   -Dmario.ga.pop=N -Dmario.ga.evals=N -Dmario.ga.agg=mean|max -Dmario.ga.hof=true : GA v2 모집단·평가판수·적합도 집계·명예의 전당 [DAY18 트라이2·DAY19]
         //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
         //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
         //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
@@ -61,6 +61,7 @@ public class Main {
         Long gaPop = parseLongProperty("mario.ga.pop");       // [DAY18 트라이2] GA v2 모집단 (미지정=30)
         Long gaEvals = parseLongProperty("mario.ga.evals");   // [DAY18 트라이2] GA v2 개체당 평가 판수 (미지정=1)
         String gaAgg = System.getProperty("mario.ga.agg");    // [DAY19] GA v2 적합도 집계 mean|max (미지정=mean)
+        boolean gaHof = Boolean.parseBoolean(System.getProperty("mario.ga.hof", "false")); // [DAY19 트라이2] GA v2 명예의 전당 (미지정=false)
         String loadPath = System.getProperty("mario.load");
         String savePath = System.getProperty("mario.save");
         Long portProp = parseLongProperty("mario.port");
@@ -68,7 +69,7 @@ public class Main {
         Long actionsProp = parseLongProperty("mario.actions");
 
         try (SocketClient socketClient = new SocketClient(HOST, port)) {
-            Brain brain = createBrain(algo, seed, actionsProp, lambda, nstep, gaPop, gaEvals, gaAgg);
+            Brain brain = createBrain(algo, seed, actionsProp, lambda, nstep, gaPop, gaEvals, gaAgg, gaHof);
             System.out.println("[Main] 알고리즘: " + algo);
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
@@ -84,7 +85,8 @@ public class Main {
                 long evals = (gaEvals != null) ? gaEvals : 1;
                 String agg = (gaAgg != null) ? gaAgg.trim().toLowerCase() : "mean";
                 System.out.println("[Main] GA v2 모집단: " + pop + " · 개체당 평가 판수: " + evals
-                        + " · 적합도 집계: " + agg + " (→ " + (MAX_EPISODES / (pop * evals)) + "세대)");
+                        + " · 적합도 집계: " + agg + " · 명예의 전당: " + gaHof
+                        + " (→ " + (MAX_EPISODES / (pop * evals)) + "세대)");
             }
             if (actionsProp != null) {
                 System.out.println("[Main] 행동 수 제한: " + actionsProp + " (긴 점프 " + (actionsProp >= 7 ? "포함" : "제외") + ")");
@@ -124,14 +126,14 @@ public class Main {
      * @return 생성된 {@link Brain}
      */
     private static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep,
-                                     Long gaPop, Long gaEvals, String gaAgg) {
+                                     Long gaPop, Long gaEvals, String gaAgg, boolean gaHof) {
         boolean hasSeed = seed != null;
         boolean hasActions = actions != null;
         long s = hasSeed ? seed : 0L;
         int a = hasActions ? actions.intValue() : 0;
         double lam = (lambda != null) ? lambda : 0.9;
         int n = (nstep != null) ? nstep.intValue() : 8;
-        boolean hasGaTuning = (gaPop != null) || (gaEvals != null) || (gaAgg != null);
+        boolean hasGaTuning = (gaPop != null) || (gaEvals != null) || (gaAgg != null) || gaHof;
         int pop = (gaPop != null) ? gaPop.intValue() : 30;
         int evals = (gaEvals != null) ? gaEvals.intValue() : 1;
         GeneticAlgorithmV2.FitnessAggregation gaAggMode = GeneticAlgorithmV2.FitnessAggregation.fromString(gaAgg);
@@ -181,9 +183,9 @@ public class Main {
                 return new GeneticAlgorithm();
             case "ga_v2":
             case "genetic_v2":
-                // [DAY18 트라이2·DAY19] 모집단·평가 판수·집계를 지정하면 그 생성자로(예산 1500 = pop × 세대 × evals).
+                // [DAY18 트라이2·DAY19] 모집단·평가 판수·집계·명예의 전당을 지정하면 그 생성자로(예산 1500 = pop × 세대 × evals).
                 if (hasGaTuning) {
-                    return new GeneticAlgorithmV2(s, hasActions ? a : Action.ACTION_SIZE, pop, evals, gaAggMode);
+                    return new GeneticAlgorithmV2(s, hasActions ? a : Action.ACTION_SIZE, pop, evals, gaAggMode, gaHof);
                 }
                 if (hasSeed && hasActions) return new GeneticAlgorithmV2(s, a);
                 if (hasSeed) return new GeneticAlgorithmV2(s);

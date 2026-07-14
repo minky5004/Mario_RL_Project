@@ -14,6 +14,7 @@ import com.mario.rl.agent.RandomBrain;
 import com.mario.rl.agent.SARSA;
 import com.mario.rl.agent.SARSALambda;
 import com.mario.rl.agent.TabularBrain;
+import com.mario.rl.model.Action;
 import com.mario.rl.network.SocketClient;
 import com.mario.rl.util.Logger;
 import com.mario.rl.util.StateEncoder;
@@ -56,6 +57,8 @@ public class Main {
         Long seed = parseLongProperty("mario.seed");
         Double lambda = parseDoubleProperty("mario.lambda");  // [DAY15] SARSA(λ) 적격흔적 λ (미지정=0.9)
         Long nstep = parseLongProperty("mario.nstep");        // [DAY17] n-step SARSA의 n (미지정=8)
+        Long gaPop = parseLongProperty("mario.ga.pop");       // [DAY18 트라이2] GA v2 모집단 (미지정=30)
+        Long gaEvals = parseLongProperty("mario.ga.evals");   // [DAY18 트라이2] GA v2 개체당 평가 판수 (미지정=1)
         String loadPath = System.getProperty("mario.load");
         String savePath = System.getProperty("mario.save");
         Long portProp = parseLongProperty("mario.port");
@@ -63,7 +66,7 @@ public class Main {
         Long actionsProp = parseLongProperty("mario.actions");
 
         try (SocketClient socketClient = new SocketClient(HOST, port)) {
-            Brain brain = createBrain(algo, seed, actionsProp, lambda, nstep);
+            Brain brain = createBrain(algo, seed, actionsProp, lambda, nstep, gaPop, gaEvals);
             System.out.println("[Main] 알고리즘: " + algo);
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
@@ -73,6 +76,12 @@ public class Main {
             }
             if (algo.equals("nstep_sarsa")) {
                 System.out.println("[Main] n(부트스트랩까지 쌓는 실제 보상 칸 수): " + (nstep != null ? nstep : 8));
+            }
+            if (algo.startsWith("ga_v2") || algo.equals("genetic_v2")) {
+                long pop = (gaPop != null) ? gaPop : 30;
+                long evals = (gaEvals != null) ? gaEvals : 1;
+                System.out.println("[Main] GA v2 모집단: " + pop + " · 개체당 평가 판수: " + evals
+                        + " (→ " + (MAX_EPISODES / (pop * evals)) + "세대)");
             }
             if (actionsProp != null) {
                 System.out.println("[Main] 행동 수 제한: " + actionsProp + " (긴 점프 " + (actionsProp >= 7 ? "포함" : "제외") + ")");
@@ -111,13 +120,17 @@ public class Main {
      * @param nstep   n-step SARSA의 n(null이면 두뇌 기본값 8)
      * @return 생성된 {@link Brain}
      */
-    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep) {
+    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep,
+                                     Long gaPop, Long gaEvals) {
         boolean hasSeed = seed != null;
         boolean hasActions = actions != null;
         long s = hasSeed ? seed : 0L;
         int a = hasActions ? actions.intValue() : 0;
         double lam = (lambda != null) ? lambda : 0.9;
         int n = (nstep != null) ? nstep.intValue() : 8;
+        boolean hasGaTuning = (gaPop != null) || (gaEvals != null);
+        int pop = (gaPop != null) ? gaPop.intValue() : 30;
+        int evals = (gaEvals != null) ? gaEvals.intValue() : 1;
         switch (algo) {
             case "double_qlearning":
             case "double_q":
@@ -164,6 +177,8 @@ public class Main {
                 return new GeneticAlgorithm();
             case "ga_v2":
             case "genetic_v2":
+                // [DAY18 트라이2] 모집단·평가 판수를 지정하면 그 생성자로(예산 1500 = pop × 세대 × evals).
+                if (hasGaTuning) return new GeneticAlgorithmV2(s, hasActions ? a : Action.ACTION_SIZE, pop, evals);
                 if (hasSeed && hasActions) return new GeneticAlgorithmV2(s, a);
                 if (hasSeed) return new GeneticAlgorithmV2(s);
                 if (hasActions) return new GeneticAlgorithmV2(a);

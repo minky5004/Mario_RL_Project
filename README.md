@@ -86,6 +86,7 @@ docker run --rm -p 9999:9999 -p 8081:8081 mario-env   # 8081 = 브라우저 화�
 | `-Dmario.algo=qlearning\|double_q\|sarsa\|sarsa_lambda\|nstep_sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|ga_v2\|es` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘, **ga_v2=GA 개편판**, es=진화 전략) | `qlearning` |
 | `-Dmario.lambda=0.9` | SARSA(λ)의 적격흔적 감쇠 λ | 0.9 |
 | `-Dmario.nstep=8` | n-step SARSA의 n(실제 보상을 몇 칸 쌓고 부트스트랩할지) | 8 |
+| `-Dmario.ga.pop=N -Dmario.ga.evals=K -Dmario.ga.agg=mean\|max -Dmario.ga.hof=true` | GA v2 모집단·평가 판수·적합도 집계·명예의 전당(역대 최고 개체 재주입) | 30·1·mean·false |
 | `-Dmario.seed=N` | 난수 시드 고정(재현·시드 비교) | 없음 |
 | `-Dmario.port=N` | 서버 포트(병렬 실행용) | 9999 |
 | `-Dmario.actions=6` | 쓰는 행동 수(6 = 긴 점프 끔) | 7 |

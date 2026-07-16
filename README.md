@@ -25,7 +25,8 @@
 | **Q-Learning** | 매 스텝, 다음 상태에서 *가장 좋은* 행동을 가정(`max`)해 Q값을 갱신 | **off-policy** — 탐험과 무관하게 최적 정책을 학습, 공격적 | ✅ |
 | **SARSA** | 다음 상태에서 *실제로 고른* 행동의 Q값으로 갱신 | **on-policy** — 탐험의 위험을 학습에 반영해 더 보수적·안전 | ✅ |
 | **SARSA(λ)** 🥇 | SARSA + **적격흔적** — 최근 밟은 상태들에 "책임 꼬리표"를 남겨 한 번의 오차를 과거로 한꺼번에 전파 | **비교군 최상위.** 실측: clear 12배·첫 깃발 3.8배 일찍(5/5 전 시드)·timeout 최저(17). sparse-reward의 진짜 병목(신용 전파)을 정면으로 품 | ✅ |
-| **n-step SARSA** 🥈 | 실제 보상을 **n칸(8)** 쌓은 뒤 그 지점부터 추정치로 부트스트랩 (n=1이면 SARSA, n=∞면 Monte Carlo) | **MC와 TD를 잇는 다리.** 실측: MC에 부트스트랩을 되돌리자 timeout 580→59·clear 5→206으로 부활해 2위 | ✅ |
+| **Watkins Q(λ)** 🥈 | Q-Learning + **적격흔적** — 단 off-policy라 탐험한 순간 흔적을 **자른다**(Watkins cut) | 실측: QL을 분포째 압도(clear 36→225·5/5 깃발) = **QL 계보 첫 강화 성공.** SARSA(λ)와 본선이 겹치는 최상위권 — cut의 비용은 ε 높은 초반에만 청구됨(첫 깃발 470 vs 230) | ✅ |
+| **n-step SARSA** 🥉 | 실제 보상을 **n칸(8)** 쌓은 뒤 그 지점부터 추정치로 부트스트랩 (n=1이면 SARSA, n=∞면 Monte Carlo) | **MC와 TD를 잇는 다리.** 실측: MC에 부트스트랩을 되돌리자 timeout 580→59·clear 5→206으로 부활, 흔적 듀오 다음 자리 | ✅ |
 | **Expected SARSA** | 다음 행동들의 *기대값*(정책 확률로 가중 평균 `(1-ε)·max + ε·mean`)으로 갱신 | 분산을 줄여 더 안정적 — 실측: SARSA의 timeout 성향을 Q-Learning 쪽으로 완화 | ✅ |
 | **Double Q-Learning** | 테이블 2벌로 "**고르기**(argmax)"와 "**값 읽기**"를 분리해 최대화 편향(과대추정) 제거 | 실측: **이 환경에선 오히려 후퇴**(clear 36→1) — sparse-reward 1-1에선 QL의 낙관이 되레 드문 깃발 경로로 미는 힘이었다 | ✅ |
 | **Monte Carlo** | 한 *에피소드가 끝난 뒤* 실제 받은 보상 총합으로 갱신(부트스트랩 없음) | 편향은 없지만 분산이 크고 느림 — 실측: 본선에서 TD에 *처음으로 밀림*, timeout이 Random급(끝을 못 냄). 깃발엔 닿음 | ✅ |
@@ -83,8 +84,8 @@ docker run --rm -p 9999:9999 -p 8081:8081 mario-env   # 8081 = 브라우저 화�
 
 | 옵션 | 뜻 | 기본 |
 |---|---|---|
-| `-Dmario.algo=qlearning\|double_q\|sarsa\|sarsa_lambda\|nstep_sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|ga_v2\|es` | 알고리즘 선택 (random=무학습 기준선, ga=유전 알고리즘, **ga_v2=GA 개편판**, es=진화 전략) | `qlearning` |
-| `-Dmario.lambda=0.9` | SARSA(λ)의 적격흔적 감쇠 λ | 0.9 |
+| `-Dmario.algo=qlearning\|q_lambda\|double_q\|sarsa\|sarsa_lambda\|nstep_sarsa\|expected_sarsa\|monte_carlo\|random\|ga\|ga_v2\|es` | 알고리즘 선택 (q_lambda=Watkins Q(λ), random=무학습 기준선, ga=유전 알고리즘, **ga_v2=GA 개편판**, es=진화 전략) | `qlearning` |
+| `-Dmario.lambda=0.9` | SARSA(λ)·Watkins Q(λ)의 적격흔적 감쇠 λ | 0.9 |
 | `-Dmario.nstep=8` | n-step SARSA의 n(실제 보상을 몇 칸 쌓고 부트스트랩할지) | 8 |
 | `-Dmario.ga.pop=N -Dmario.ga.evals=K -Dmario.ga.agg=mean\|max -Dmario.ga.hof=true` | GA v2 모집단·평가 판수·적합도 집계·명예의 전당(역대 최고 개체 재주입) | 30·1·mean·false |
 | `-Dmario.seed=N` | 난수 시드 고정(재현·시드 비교) | 없음 |
@@ -108,6 +109,7 @@ Mario_RL_Project/
 │   │   ├── Brain.java           #   두뇌 공통 인터페이스
 │   │   ├── TabularBrain.java    #   표 기반 공통 베이스(두 테이블·ε·저장/로드)
 │   │   ├── QLearning.java       #   off-policy TD (bootstrap=max)
+│   │   ├── QLambda.java         #   Q-Learning + 적격흔적 + Watkins cut(탐험 시 흔적 절단)
 │   │   ├── DoubleQLearning.java #   최대화 편향 제거(테이블 2벌: 고르기/읽기 분리)
 │   │   ├── SARSA.java           #   on-policy TD (bootstrap=실제 다음 행동)
 │   │   ├── SARSALambda.java     #   SARSA + 적격흔적(신용을 흔적만큼 과거로 전파)

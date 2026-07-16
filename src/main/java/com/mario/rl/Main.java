@@ -8,6 +8,7 @@ import com.mario.rl.agent.GeneticAlgorithm;
 import com.mario.rl.agent.GeneticAlgorithmV2;
 import com.mario.rl.agent.MonteCarlo;
 import com.mario.rl.agent.NStepSARSA;
+import com.mario.rl.agent.QLambda;
 import com.mario.rl.agent.QLearning;
 import com.mario.rl.agent.RLAgent;
 import com.mario.rl.agent.RandomBrain;
@@ -48,13 +49,14 @@ public class Main {
         System.out.println("=== Mario RL (Q-Learning) 학습 시작 ===");
 
         // [DAY9~10] 실행 옵션 — 시스템 프로퍼티(미지정이면 기존 동작 = qlearning·시드 없음·로드/저장 없음, 회귀 방지).
-        //   -Dmario.algo=qlearning|double_qlearning|sarsa|sarsa_lambda|nstep_sarsa|expected_sarsa|monte_carlo|random|ga|ga_v2|es : 알고리즘 선택 [DAY10~18] (double_qlearning=최대화 편향 제거, nstep_sarsa=MC와 TD를 잇는 n-step, random=무학습 기준선, ga=유전 알고리즘, ga_v2=GA 개편판(softmax·공통테이블만·적합도 maxX), es=진화 전략)
+        //   -Dmario.algo=qlearning|q_lambda|double_qlearning|sarsa|sarsa_lambda|nstep_sarsa|expected_sarsa|monte_carlo|random|ga|ga_v2|es : 알고리즘 선택 [DAY10~20] (q_lambda=Watkins Q(λ), double_qlearning=최대화 편향 제거, nstep_sarsa=MC와 TD를 잇는 n-step, random=무학습 기준선, ga=유전 알고리즘, ga_v2=GA 개편판(softmax·공통테이블만·적합도 maxX), es=진화 전략)
         //   -Dmario.ga.pop=N -Dmario.ga.evals=N -Dmario.ga.agg=mean|max -Dmario.ga.hof=true : GA v2 모집단·평가판수·적합도 집계·명예의 전당 [DAY18 트라이2·DAY19]
         //   -Dmario.seed=N   : 난수 시드 고정(시드 N회 반복 비교용)
         //   -Dmario.port=N   : 서버 포트(시드 병렬 실행용)
         //   -Dmario.actions=N: 쓰는 행동 수(6=긴 점프 끔)
         //   -Dmario.load/save=경로 : Q-Table 로드/저장(표 알고리즘만)
         String algo = System.getProperty("mario.algo", "qlearning").trim().toLowerCase();
+        // (mario.lambda 는 sarsa_lambda 와 q_lambda 가 같은 손잡이를 공유한다 [DAY20])
         Long seed = parseLongProperty("mario.seed");
         Double lambda = parseDoubleProperty("mario.lambda");  // [DAY15] SARSA(λ) 적격흔적 λ (미지정=0.9)
         Long nstep = parseLongProperty("mario.nstep");        // [DAY17] n-step SARSA의 n (미지정=8)
@@ -74,7 +76,7 @@ public class Main {
             if (seed != null) {
                 System.out.println("[Main] 시드 고정: " + seed);
             }
-            if (algo.equals("sarsa_lambda")) {
+            if (algo.equals("sarsa_lambda") || algo.equals("q_lambda") || algo.equals("qlambda")) {
                 System.out.println("[Main] λ(적격흔적): " + (lambda != null ? lambda : 0.9));
             }
             if (algo.equals("nstep_sarsa")) {
@@ -118,7 +120,7 @@ public class Main {
     /**
      * 알고리즘 이름으로 두뇌를 만든다. [DAY10] seed·actions 조합을 알맞은 생성자로 라우팅.
      *
-     * @param algo    "qlearning" | "double_qlearning" | "sarsa" | "sarsa_lambda" | "nstep_sarsa" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "ga_v2" | "es" (그 외는 qlearning 으로 폴백)
+     * @param algo    "qlearning" | "q_lambda" | "double_qlearning" | "sarsa" | "sarsa_lambda" | "nstep_sarsa" | "expected_sarsa" | "monte_carlo" | "random" | "ga" | "ga_v2" | "es" (그 외는 qlearning 으로 폴백)
      * @param seed    시드(null이면 비결정적)
      * @param actions 쓰는 행동 수(null이면 전체)
      * @param lambda  SARSA(λ) 적격흔적 λ(null이면 두뇌 기본값 0.9)
@@ -138,6 +140,13 @@ public class Main {
         int evals = (gaEvals != null) ? gaEvals.intValue() : 1;
         GeneticAlgorithmV2.FitnessAggregation gaAggMode = GeneticAlgorithmV2.FitnessAggregation.fromString(gaAgg);
         switch (algo) {
+            case "q_lambda":
+            case "qlambda":
+            case "watkins_q_lambda":
+                if (hasSeed && hasActions) return new QLambda(s, a, lam);
+                if (hasSeed) return new QLambda(s, lam);
+                if (hasActions) return new QLambda(a, lam);
+                return new QLambda(lam);
             case "double_qlearning":
             case "double_q":
                 if (hasSeed && hasActions) return new DoubleQLearning(s, a);

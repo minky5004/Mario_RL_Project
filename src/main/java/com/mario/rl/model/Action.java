@@ -41,7 +41,7 @@ public enum Action {
     /**
      * 이 행동에 대응하는 정수 액션 인덱스를 반환한다.
      *
-     * @return Python 액션 인덱스 (0~5)
+     * @return Python 액션 인덱스 (0~6)
      */
     public int getValue() {
         return value;
@@ -50,7 +50,7 @@ public enum Action {
     /**
      * 정수 액션 인덱스를 대응하는 {@link Action}으로 변환한다.
      *
-     * @param value 액션 인덱스 (0~5)
+     * @param value 액션 인덱스 (0~6)
      * @return 해당하는 {@link Action}
      * @throws IllegalArgumentException 정의되지 않은 인덱스가 주어진 경우
      */

@@ -127,8 +127,9 @@ public class Main {
      * @param nstep   n-step SARSA의 n(null이면 두뇌 기본값 8)
      * @return 생성된 {@link Brain}
      */
-    private static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep,
-                                     Long gaPop, Long gaEvals, String gaAgg, boolean gaHof) {
+    // 가시성이 package-private인 이유: 알고리즘 이름 → 두뇌 매핑(별칭 포함)을 단위 테스트에서 직접 검증하기 위함.
+    static Brain createBrain(String algo, Long seed, Long actions, Double lambda, Long nstep,
+                             Long gaPop, Long gaEvals, String gaAgg, boolean gaHof) {
         boolean hasSeed = seed != null;
         boolean hasActions = actions != null;
         long s = hasSeed ? seed : 0L;
